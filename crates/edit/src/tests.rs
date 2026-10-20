@@ -4,6 +4,44 @@ use pdfcraft_cos::{Document, SaveOptions, write_full, write_incremental};
 
 use super::*;
 
+#[test]
+fn export_levels_keep_nested_marks_of_one_paragraph_together() {
+    let doc = text_page(
+        "/Span <</MCID 0>> BDC BT /F1 12 Tf 20 700 Td (Head) Tj \
+        /Span <</MCID 1>> BDC (ing) Tj EMC ET EMC \
+        /Span <</MCID 2>> BDC BT /F1 24 Tf 20 650 Td (Body) Tj ET EMC \
+        /Span <</MCID 3>> BDC BT /F1 12 Tf 20 600 Td (Unknown) Tj ET EMC",
+    );
+    let before = write_incremental(&doc, &SaveOptions::default()).unwrap();
+    let levels = |stream, mcid| {
+        assert_eq!(stream, None);
+        match mcid {
+            0 | 1 => Some((42, 4)),
+            2 => Some((43, 0)),
+            3 => Some((44, 99)),
+            _ => None,
+        }
+    };
+    let reading = reading_blocks_with_heading_levels(&doc, 0, &levels).unwrap();
+    let blocks: Vec<_> = reading.blocks.iter().map(|b| (b.text.as_str(), b.heading_level)).collect();
+    assert_eq!(blocks, [("Heading", Some(4)), ("Body", Some(0)), ("Unknown", None)]);
+    assert!(!reading.truncated);
+    assert_eq!(write_incremental(&doc, &SaveOptions::default()).unwrap(), before);
+    assert!(reading_blocks_checked(&doc, 0).unwrap().blocks.iter().all(|b| b.heading_level.is_none()));
+}
+
+#[test]
+fn distinct_structure_paragraphs_with_the_same_level_do_not_merge() {
+    let doc = text_page(
+        "/Span <</MCID 0>> BDC BT /F1 12 Tf 20 700 Td (First) Tj ET EMC \
+        /Span <</MCID 1>> BDC BT /F1 12 Tf 20 686 Td (Second) Tj ET EMC",
+    );
+    let levels = |_, mcid| Some((usize::try_from(mcid).unwrap(), 2));
+    let reading = reading_blocks_with_heading_levels(&doc, 0, &levels).unwrap();
+    assert_eq!(reading.blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(), ["First", "Second"]);
+    assert!(reading.blocks.iter().all(|b| b.heading_level == Some(2)));
+}
+
 /// Three pages: an upright page with content that leaves the graphics state changed (an
 /// unbalanced `cm`), a page rotated 90° and one with inherited, shared resources.
 fn fixture() -> Document {

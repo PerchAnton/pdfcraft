@@ -61,7 +61,8 @@ pub struct TextLine {
     /// Where the line starts: text matrix (text space), the state there, and its `BT`.
     origin: Origin,
     /// Explicit marked-content scope (when present); distinct scopes must not be guessed into one paragraph.
-    scope: Option<usize>,
+    scope: Option<ContentScope>,
+    heading_level: Option<u8>,
     /// Right-to-left `/ActualText` already supplies typing order; glyph text still needs bidi
     /// recovery. Left-to-right ActualText (e.g. a Latin ligature) joins its line as usual.
     logical_order: bool,
@@ -264,6 +265,8 @@ pub struct TextBlock {
     pub color: [f64; 3],
     /// Counterclockwise baseline angle in page user space, in degrees.
     pub rotation: f64,
+    /// Explicit structure level for export: 0 for P, 1–6 for H1–H6, None for size inference.
+    pub heading_level: Option<u8>,
     /// Indexes into [`text_lines`].
     pub lines: Vec<usize>,
     /// Visual rows; each contains indexes into [`text_lines`], including mixed-style runs.
@@ -665,7 +668,8 @@ struct Shown {
     italic: bool,
     visual_order: bool,
     decodable: bool,
-    scope: Option<usize>,
+    scope: Option<ContentScope>,
+    heading_level: Option<u8>,
     logical_order: bool,
     actual_text: bool,
 }
@@ -778,13 +782,26 @@ fn positioned_tracking(shown: &mut [Shown]) {
     }
 }
 
+// Distinguish operator-index boundaries from structure paragraph identities.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ContentScope {
+    Content(usize),
+    Structure(usize),
+}
+
+#[derive(Clone, Copy, Default)]
+struct MarkedScope {
+    scope: Option<ContentScope>,
+    heading_level: Option<u8>,
+}
+
 /// The graphics state carried from one of a page's content streams to the next: the streams
 /// are one stream in pieces (§7.8.2), so a `cm` (AutoCAD scales the whole page in the first
 /// stream), an unbalanced `q`, the font and the colour still apply in the streams after it.
 struct Carry {
     ts: Ts,
     stack: Vec<Ts>,
-    marked: Vec<Option<usize>>,
+    marked: Vec<MarkedScope>,
 }
 
 impl Carry {
@@ -809,6 +826,15 @@ impl Carry {
 /// A `Do` met while interpreting: its operator index, XObject name and the state there.
 type Invocation = (usize, Vec<u8>, Ts);
 
+// Resolve a marked-content ID within a page or form without depending on a11y.
+type HeadingResolver<'a> = dyn Fn(Option<pdfcraft_cos::ObjRef>, i64) -> Option<(usize, u8)> + 'a;
+
+#[derive(Clone, Copy)]
+struct TextProperties<'a> {
+    lists: &'a Dict,
+    heading_levels: Option<&'a dyn Fn(i64) -> Option<(usize, u8)>>,
+}
+
 fn interpret(
     doc: &Document,
     ops: &[Op],
@@ -817,7 +843,7 @@ fn interpret(
     carry: &mut Carry,
     mut invoked: Option<&mut Vec<Invocation>>,
     // `Some(properties)`: read `/ActualText`, looking named property lists up in `properties`.
-    logical_text: Option<&Dict>,
+    logical_text: Option<TextProperties<'_>>,
 ) -> Vec<Shown> {
     let mut out: Vec<Shown> = Vec::new();
     let mut ts = carry.ts.clone();
@@ -833,11 +859,25 @@ fn interpret(
                 // Marked text paragraphs/headings are authoritative boundaries. Ignore
                 // artifacts and inner spans, which inherit their enclosing region.
                 let region = matches!(op.name(0), Some(b"P" | b"H" | b"H1" | b"H2" | b"H3" | b"H4" | b"H5" | b"H6" | b"LI" | b"TD" | b"TH"));
-                marked.push(if region { Some(i) } else { marked.last().copied().flatten() });
                 // The property list is inline or named in the resources' /Properties (§14.6.2).
                 let list = logical_text.and_then(|properties| match op.operands.get(1) {
-                    Some(Object::Name(n)) => properties.get(n).and_then(|o| doc.dict(o)),
+                    Some(Object::Name(n)) => properties.lists.get(n).and_then(|o| doc.dict(o)),
                     other => other.and_then(Object::as_dict).cloned(),
+                });
+                let heading_level = list
+                    .as_ref()
+                    .and_then(|d| d.get(b"MCID"))
+                    .and_then(Object::as_int)
+                    .and_then(|mcid| logical_text.and_then(|p| p.heading_levels).and_then(|f| f(mcid)))
+                    .filter(|(_, level)| *level <= 6);
+                let parent = marked.last().copied().unwrap_or_default();
+                marked.push(MarkedScope {
+                    scope: heading_level.map(|(owner, _)| ContentScope::Structure(owner)).or(if region {
+                        Some(ContentScope::Content(i))
+                    } else {
+                        parent.scope
+                    }),
+                    heading_level: heading_level.map(|(_, level)| level).or(parent.heading_level),
                 });
                 let logical = list.as_ref().and_then(|d| d.get(b"ActualText")).and_then(|s| match s {
                     Object::String(s) if s.bytes.len() <= 4_000_000 => Some(s.to_text()),
@@ -1077,7 +1117,8 @@ fn interpret(
                     italic: m.italic,
                     visual_order: m.visual_order,
                     decodable,
-                    scope: marked.last().copied().flatten(),
+                    scope: marked.last().and_then(|m| m.scope),
+                    heading_level: marked.last().and_then(|m| m.heading_level),
                     logical_order: false,
                     actual_text: false,
                 });
@@ -1105,7 +1146,7 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
     let pieces = Pieces::join(&content_streams(doc, &p.dict).into_iter().map(|(_, d)| d).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
     let properties = res.get(b"Properties").and_then(|o| doc.dict(o)).unwrap_or_default();
-    let shown = interpret(doc, &ops, &fonts_res, &mut cache, &mut carry, None, Some(&properties));
+    let shown = interpret(doc, &ops, &fonts_res, &mut cache, &mut carry, None, Some(TextProperties { lists: &properties, heading_levels: None }));
     let mut last: Option<(usize, Pen)> = None; // the stream piece and where its last run ended
     for mut s in shown {
         // A single RTL glyph's ActualText (e.g. lam-alef) is an inline ligature, not a
@@ -1168,6 +1209,7 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
                 face: s.face.clone(),
                 stream: si,
                 scope: s.scope,
+                heading_level: s.heading_level,
                 logical_order: s.logical_order,
                 actual_text: s.actual_text,
                 clips: s.state.render_mode >= 4,
@@ -1218,7 +1260,7 @@ fn compatible_word(line: &TextLine, shown: &Shown) -> bool {
 fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream: usize) {
     let joins = last.is_some_and(|pen| {
         let bt = pen.bt;
-        lines.last().is_some_and(|l| l.scope == s.scope && l.logical_order == s.logical_order)
+        lines.last().is_some_and(|l| l.scope == s.scope && l.heading_level == s.heading_level && l.logical_order == s.logical_order)
             && (bt == s.bt || lines.last().is_some_and(|l| compatible_word(l, &s)))
             && (s.text.trim().is_empty() || lines.last().is_some_and(|l| same_font(l, &s.font, s.face.as_deref())))
             && (s.text.trim().is_empty()
@@ -1259,6 +1301,7 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
             face: s.face.clone(),
             stream,
             scope: s.scope,
+            heading_level: s.heading_level,
             logical_order: s.logical_order,
             actual_text: s.actual_text,
             clips: s.state.render_mode >= 4,
@@ -1361,21 +1404,37 @@ pub(crate) fn form_call(
 /// [`text_lines`] leaves out because it can only rewrite the page's own streams). Lines from a
 /// form carry a stream number past the page's streams, one per form drawn. The flag is `true`
 /// when forms past [`MAX_FORM_DEPTH`] or [`MAX_FORM_VISITS`] were left unread.
-fn reading_lines(doc: &Document, page: usize) -> Result<(Vec<TextLine>, bool), EditError> {
+fn reading_lines(doc: &Document, page: usize, levels: Option<&HeadingResolver<'_>>) -> Result<(Vec<TextLine>, bool), EditError> {
     struct Walk<'a> {
         doc: &'a Document,
+        levels: Option<&'a HeadingResolver<'a>>,
         lines: Vec<TextLine>,
         next_stream: usize,
         path: Vec<pdfcraft_cos::ObjRef>,
         budget: FormBudget,
     }
     /// `stream` gives the stream number of the operator at an index of `ops`.
-    fn walk(w: &mut Walk, ops: &[Op], resources: &Dict, carry: &mut Carry, stream: &dyn Fn(usize) -> usize) {
+    fn walk(
+        w: &mut Walk,
+        ops: &[Op],
+        resources: &Dict,
+        carry: &mut Carry,
+        stream: &dyn Fn(usize) -> usize,
+        levels: Option<&dyn Fn(i64) -> Option<(usize, u8)>>,
+    ) {
         let fonts_res = resources.get(b"Font").map(|f| w.doc.resolve(f)).and_then(|f| f.as_dict().cloned()).unwrap_or_default();
         let mut cache = HashMap::new();
         let mut invoked = Vec::new();
         let properties = resources.get(b"Properties").and_then(|o| w.doc.dict(o)).unwrap_or_default();
-        let shown = interpret(w.doc, ops, &fonts_res, &mut cache, carry, Some(&mut invoked), Some(&properties));
+        let shown = interpret(
+            w.doc,
+            ops,
+            &fonts_res,
+            &mut cache,
+            carry,
+            Some(&mut invoked),
+            Some(TextProperties { lists: &properties, heading_levels: levels }),
+        );
         let mut last = None;
         let mut last_stream = None;
         let mut forms = invoked.into_iter().peekable();
@@ -1406,7 +1465,10 @@ fn reading_lines(doc: &Document, page: usize) -> Result<(Vec<TextLine>, bool), E
         if let Some(r) = form.obj {
             w.path.push(r);
         }
-        walk(w, &ops, &form.resources, &mut carry, &|_| stream);
+        // An inline malformed form has no stable /Stm identity: never borrow the page MCIDs.
+        let resolver = w.levels;
+        let lookup = |mcid| form.obj.and_then(|r| resolver.and_then(|f| f(Some(r), mcid)));
+        walk(w, &ops, &form.resources, &mut carry, &|_| stream, resolver.map(|_| &lookup as &dyn Fn(i64) -> Option<(usize, u8)>));
         if form.obj.is_some() {
             w.path.pop();
         }
@@ -1414,7 +1476,7 @@ fn reading_lines(doc: &Document, page: usize) -> Result<(Vec<TextLine>, bool), E
     let p = page_dict(doc, page)?;
     let res = p.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
     let streams = content_streams(doc, &p.dict);
-    let mut w = Walk { doc, lines: Vec::new(), next_stream: streams.len(), path: Vec::new(), budget: FormBudget::default() };
+    let mut w = Walk { doc, levels, lines: Vec::new(), next_stream: streams.len(), path: Vec::new(), budget: FormBudget::default() };
     let mut carry = Carry::new();
     // Read the page's streams as the one stream they are, in one pass, as rendering and editing
     // do: a comment, an operator's operands or a marked-content sequence (its /ActualText too)
@@ -1423,7 +1485,8 @@ fn reading_lines(doc: &Document, page: usize) -> Result<(Vec<TextLine>, bool), E
     let pieces = Pieces::join(&streams.into_iter().map(|(_, data)| data).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
     let stream_of = |i: usize| ops.get(i).map_or(0, |op| pieces.pieces_of(op).0);
-    walk(&mut w, &ops, &res, &mut carry, &stream_of);
+    let lookup = |mcid| levels.and_then(|f| f(None, mcid));
+    walk(&mut w, &ops, &res, &mut carry, &stream_of, levels.map(|_| &lookup as &dyn Fn(i64) -> Option<(usize, u8)>));
     let mut lines = w.lines;
     // A visual-order Indic font draws pre-base vowel signs before their consonant.
     for l in lines.iter_mut().filter(|l| l.visual_order && !l.actual_text) {
@@ -2084,7 +2147,20 @@ pub struct ReadingBlocks {
 
 /// [`reading_blocks`], saying whether the limits that bound reading left text out.
 pub fn reading_blocks_checked(doc: &Document, page: usize) -> Result<ReadingBlocks, EditError> {
-    let (lines, truncated) = reading_lines(doc, page)?;
+    reading_blocks_with_levels(doc, page, None)
+}
+
+/// Read export paragraphs with explicit structure levels supplied by their (form stream, MCID).
+/// Return (stable paragraph identity, level): zero means P, 1–6 means H1–H6.
+/// Marks of the same paragraph must share an identity; distinct paragraphs must not.
+/// None retains size-based inference. Levels above six are ignored.
+/// The callback keeps this L4 reader independent of the L4 accessibility tree reader.
+pub fn reading_blocks_with_heading_levels(doc: &Document, page: usize, levels: &HeadingResolver<'_>) -> Result<ReadingBlocks, EditError> {
+    reading_blocks_with_levels(doc, page, Some(levels))
+}
+
+fn reading_blocks_with_levels(doc: &Document, page: usize, levels: Option<&HeadingResolver<'_>>) -> Result<ReadingBlocks, EditError> {
+    let (lines, truncated) = reading_lines(doc, page, levels)?;
     Ok(ReadingBlocks { blocks: regions::group_reading_blocks(&lines), truncated })
 }
 

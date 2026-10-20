@@ -1,0 +1,265 @@
+//! #3659: real Office exports retain the heading levels of a tagged PDF.
+use pdfcraft_automation::{Automation, Content};
+use serde_json::{Value, json};
+use std::io::Read;
+
+fn call(a: &mut Automation, tool: &str, args: Value) -> Value {
+    a.call(tool, &args)
+        .unwrap()
+        .into_iter()
+        .find_map(|c| match c {
+            Content::Json(v) => Some(v),
+            _ => None,
+        })
+        .unwrap()
+}
+
+fn tagged_pdf() -> Vec<u8> {
+    let mut content = String::new();
+    let mut elements = Vec::new();
+    let mut ids = Vec::new();
+    for level in 1..=6 {
+        let mcid = elements.len();
+        let size = match level {
+            1 => 16,
+            2 => 14,
+            3 => 13,
+            _ => 12,
+        };
+        let y = 760 - mcid * 42;
+        content.push_str(&format!("/Span <</MCID {mcid}>> BDC BT /F1 {size} Tf 50 {y} Td (Heading {level}) Tj ET EMC\n"));
+        ids.push(format!("{} 0 R", 8 + elements.len()));
+        elements.push(format!("<< /Type /StructElem /S /H{level} /P 7 0 R /Pg 3 0 R /K {mcid} >>"));
+    }
+    // A large P is body text, including when its text duplicates a heading.
+    for (text, size) in [("Heading 1", 24), ("Body text repeated often enough to define the ordinary twelve point font size.", 12)] {
+        let mcid = elements.len();
+        let y = 760 - mcid * 42;
+        content.push_str(&format!("/Span <</MCID {mcid}>> BDC BT /F1 {size} Tf 50 {y} Td ({text}) Tj ET EMC\n"));
+        ids.push(format!("{} 0 R", 8 + elements.len()));
+        elements.push(format!("<< /Type /StructElem /S /P /P 7 0 R /Pg 3 0 R /K {mcid} >>"));
+    }
+    let parent_tree = 8 + elements.len();
+    let objects: Vec<String> = [
+        "<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 6 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Contents 5 0 R /StructParents 0 /Resources << /Font << /F1 4 0 R >> >> >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        format!("<< /Length {} >>\nstream\n{content}endstream", content.len()),
+        format!("<< /Type /StructTreeRoot /K [7 0 R] /ParentTree {parent_tree} 0 R >>"),
+        format!("<< /Type /StructElem /S /Document /P 6 0 R /K [{}] >>", ids.join(" ")),
+    ]
+    .into_iter()
+    .chain(elements)
+    .chain([format!("<< /Nums [0 [{}]] >>", ids.join(" "))])
+    .collect();
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, object) in objects.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+    for offset in offsets {
+        out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer << /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes());
+    out
+}
+
+fn part(zip: &[u8], name: &str) -> String {
+    let mut at = 0;
+    while zip.get(at..at + 4) == Some(b"PK\x03\x04") {
+        let size = u32::from_le_bytes(zip[at + 18..at + 22].try_into().unwrap()) as usize;
+        let name_len = u16::from_le_bytes(zip[at + 26..at + 28].try_into().unwrap()) as usize;
+        let extra = u16::from_le_bytes(zip[at + 28..at + 30].try_into().unwrap()) as usize;
+        let data = at + 30 + name_len + extra;
+        if &zip[at + 30..at + 30 + name_len] == name.as_bytes() {
+            let mut text = String::new();
+            flate2::read::DeflateDecoder::new(&zip[data..data + size]).read_to_string(&mut text).unwrap();
+            return text;
+        }
+        at = data + size;
+    }
+    panic!("missing ZIP member {name}");
+}
+
+fn export(ext: &str) -> Vec<u8> {
+    export_pdf(tagged_pdf(), ext)
+}
+
+fn export_pdf(input: Vec<u8>, ext: &str) -> Vec<u8> {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("headings.pdf"), &input).unwrap();
+    let mut a = Automation::new().with_root(dir.path()).unwrap();
+    let doc = call(&mut a, "doc_open", json!({"path": "headings.pdf"}))["doc"].as_u64().unwrap();
+    let before = call(&mut a, "doc_info", json!({"doc": doc}));
+    call(&mut a, "doc_export_office", json!({"doc":doc,"path":format!("headings.{ext}")}));
+    assert_eq!(call(&mut a, "doc_info", json!({"doc":doc})), before, "export is read-only");
+    assert_eq!(std::fs::read(dir.path().join("headings.pdf")).unwrap(), input);
+    std::fs::read(dir.path().join(format!("headings.{ext}"))).unwrap()
+}
+
+#[test]
+fn html_export_preserves_tagged_heading_levels() {
+    let html = String::from_utf8(export("html")).unwrap();
+    for level in 1..=6 {
+        assert!(html.contains(&format!("<h{level}>Heading {level}</h{level}>")), "{html}");
+    }
+    assert!(html.contains("<p>Heading 1</p>"), "a large tagged P stays a paragraph: {html}");
+}
+
+#[test]
+fn word_export_preserves_tagged_heading_levels() {
+    let zip = export("docx");
+    let xml = part(&zip, "word/document.xml");
+    let styles = part(&zip, "word/styles.xml");
+    for level in 1..=6 {
+        let heading = format!("Heading {level}");
+        let para = xml.split("<w:p>").find(|p| p.contains(&format!(">{heading}</w:t>"))).unwrap();
+        assert!(para.contains(&format!("<w:pStyle w:val=\"Heading{level}\"/>")), "{para}");
+        let style = styles.split("<w:style ").find(|s| s.contains(&format!("w:styleId=\"Heading{level}\""))).unwrap();
+        assert!(style.contains(&format!("<w:outlineLvl w:val=\"{}\"/>", level - 1)), "{style}");
+    }
+    let copies: Vec<_> = xml.split("<w:p>").filter(|p| p.contains(">Heading 1</w:t>")).collect();
+    assert_eq!(copies.len(), 2, "{xml}");
+    assert!(!copies[1].contains("<w:pStyle"), "a large P does not become a heading: {}", copies[1]);
+}
+
+fn modified_pdf(edit: impl FnOnce(&mut pdfcraft_cos::Document)) -> Vec<u8> {
+    let mut doc = pdfcraft_cos::Document::open(std::sync::Arc::new(tagged_pdf())).unwrap();
+    edit(&mut doc);
+    pdfcraft_cos::write_full(&doc, &pdfcraft_cos::SaveOptions::default()).unwrap()
+}
+fn source_content(doc: &pdfcraft_cos::Document) -> String {
+    let stream = doc.get(pdfcraft_cos::ObjRef::new(5, 0));
+    let pdfcraft_cos::Object::Stream(stream) = &*stream else { panic!("content stream") };
+    String::from_utf8(stream.decoded().unwrap()).unwrap()
+}
+fn set_content(doc: &mut pdfcraft_cos::Document, content: &str) {
+    doc.set(pdfcraft_cos::ObjRef::new(5, 0), pdfcraft_cos::Stream::flate(pdfcraft_cos::Dict::new(), content.as_bytes()));
+}
+
+#[test]
+fn rolemapped_heading_keeps_nested_spans_across_content_streams_together() {
+    use pdfcraft_cos::{Dict, ObjRef, Object, Stream};
+    let pdf = modified_pdf(|doc| {
+        let mut roles = Dict::new();
+        roles.set("Chapter", Object::name("H4"));
+        doc.update_dict(ObjRef::new(6, 0), |d| d.set("RoleMap", Object::Dict(roles))).unwrap();
+        let mut child = Dict::new();
+        child.set("Type", Object::name("StructElem"));
+        child.set("S", Object::name("Span"));
+        child.set("P", Object::Ref(ObjRef::new(8, 0)));
+        child.set("K", Object::Int(8));
+        let child = doc.add(Object::Dict(child));
+        doc.update_dict(ObjRef::new(8, 0), |d| {
+            d.set("S", Object::name("Chapter"));
+            d.set("K", Object::Array(vec![Object::Int(0), Object::Ref(child)]));
+        })
+        .unwrap();
+        let parents: Vec<Object> = (8..16).map(|i| Object::Ref(ObjRef::new(i, 0))).chain([Object::Ref(child)]).collect();
+        doc.update_dict(ObjRef::new(16, 0), |d| d.set("Nums", Object::Array(vec![Object::Int(0), Object::Array(parents)]))).unwrap();
+        let mut resource = doc.get(ObjRef::new(3, 0)).as_dict().unwrap().get(b"Resources").unwrap().as_dict().unwrap().clone();
+        let mut properties = Dict::new();
+        let mut mark = Dict::new();
+        mark.set("MCID", Object::Int(0));
+        properties.set("M0", Object::Dict(mark));
+        resource.set("Properties", Object::Dict(properties));
+        let content = source_content(doc);
+        let (_, rest) = content.split_once('\n').unwrap();
+        let content = format!("/Span /M0 BDC BT /F1 16 Tf 50 760 Td (Head) Tj /Span <</MCID 8>> BDC (ing 1) Tj EMC ET EMC\n{rest}");
+        let split = content.find("MCID 8").unwrap() + 5;
+        let first = doc.add(Object::Stream(Stream::flate(Dict::new(), &content.as_bytes()[..split])));
+        let second = doc.add(Object::Stream(Stream::flate(Dict::new(), &content.as_bytes()[split..])));
+        doc.update_dict(ObjRef::new(3, 0), |d| {
+            d.set("Resources", Object::Dict(resource));
+            d.set("Contents", Object::Array(vec![Object::Ref(first), Object::Ref(second)]));
+        })
+        .unwrap();
+    });
+    let html = String::from_utf8(export_pdf(pdf, "html")).unwrap();
+    assert_eq!(html.matches("<h4>Heading 1</h4>").count(), 1, "{html}");
+    assert!(html.contains("<p>Heading 1</p>"), "{html}");
+    assert!(!html.contains(">Head</") && !html.contains(">ing 1</"), "{html}");
+}
+
+#[test]
+fn form_and_page_marks_with_the_same_mcid_keep_distinct_roles() {
+    use pdfcraft_cos::{Dict, ObjRef, Object, Stream};
+    let pdf = modified_pdf(|doc| {
+        let content = source_content(doc);
+        let (first, rest) = content.split_once('\n').unwrap();
+        let mut resources = doc.get(ObjRef::new(3, 0)).as_dict().unwrap().get(b"Resources").unwrap().as_dict().unwrap().clone();
+        let mut fd = Dict::new();
+        fd.set("Type", Object::name("XObject"));
+        fd.set("Subtype", Object::name("Form"));
+        fd.set("BBox", Object::Array(vec![0, 0, 612, 842].into_iter().map(Object::Int).collect()));
+        fd.set("Resources", Object::Dict(resources.clone()));
+        fd.set("StructParents", Object::Int(1));
+        let form = doc.add(Object::Stream(Stream::flate(fd, first.as_bytes())));
+        let mut xobjects = Dict::new();
+        xobjects.set("Fm", Object::Ref(form));
+        resources.set("XObject", Object::Dict(xobjects));
+        doc.update_dict(ObjRef::new(3, 0), |d| d.set("Resources", Object::Dict(resources))).unwrap();
+        set_content(doc, &format!("/Fm Do\n{}", rest.replace("MCID 6", "MCID 0")));
+        let mut mcr = Dict::new();
+        mcr.set("Type", Object::name("MCR"));
+        mcr.set("Pg", Object::Ref(ObjRef::new(3, 0)));
+        mcr.set("Stm", Object::Ref(form));
+        mcr.set("MCID", Object::Int(0));
+        doc.update_dict(ObjRef::new(8, 0), |d| d.set("K", Object::Dict(mcr))).unwrap();
+        doc.update_dict(ObjRef::new(14, 0), |d| d.set("K", Object::Int(0))).unwrap();
+        let parents: Vec<Object> =
+            [14, 9, 10, 11, 12, 13, 0, 15].into_iter().map(|n| if n == 0 { Object::Null } else { Object::Ref(ObjRef::new(n, 0)) }).collect();
+        doc.update_dict(ObjRef::new(16, 0), |d| {
+            d.set(
+                "Nums",
+                Object::Array(vec![Object::Int(0), Object::Array(parents), Object::Int(1), Object::Array(vec![Object::Ref(ObjRef::new(8, 0))])]),
+            )
+        })
+        .unwrap();
+    });
+    for ext in ["html", "docx"] {
+        let out = export_pdf(pdf.clone(), ext);
+        if ext == "html" {
+            let html = String::from_utf8(out).unwrap();
+            assert!(html.contains("<h1>Heading 1</h1>") && html.contains("<p>Heading 1</p>"), "{html}");
+        } else {
+            let xml = part(&out, "word/document.xml");
+            let copies: Vec<_> = xml.split("<w:p>").filter(|p| p.contains(">Heading 1</w:t>")).collect();
+            assert_eq!(copies.len(), 2, "{xml}");
+            assert!(copies[0].contains("w:val=\"Heading1\"") && !copies[1].contains("<w:pStyle"), "{xml}");
+        }
+    }
+}
+
+#[test]
+fn untagged_and_unnumbered_headings_keep_the_size_heuristic() {
+    use pdfcraft_cos::{ObjRef, Object};
+    let untagged = modified_pdf(|doc| {
+        doc.update_dict(ObjRef::new(1, 0), |d| {
+            d.remove(b"StructTreeRoot");
+            d.remove(b"MarkInfo");
+        })
+        .unwrap();
+    });
+    let html = String::from_utf8(export_pdf(untagged, "html")).unwrap();
+    assert!(html.contains("<h2>Heading 1</h2>") && html.contains("<h1>Heading 1</h1>"), "{html}");
+    let generic = modified_pdf(|doc| {
+        doc.update_dict(ObjRef::new(8, 0), |d| d.set("S", Object::name("H"))).unwrap();
+    });
+    let html = String::from_utf8(export_pdf(generic, "html")).unwrap();
+    assert!(html.contains("<h2>Heading 1</h2>") && html.contains("<p>Heading 1</p>"), "{html}");
+}
+
+#[test]
+fn broken_structure_cycles_fall_back_without_changing_the_input() {
+    use pdfcraft_cos::{ObjRef, Object};
+    let pdf = modified_pdf(|doc| {
+        doc.update_dict(ObjRef::new(8, 0), |d| d.set("K", Object::Ref(ObjRef::new(8, 0)))).unwrap();
+    });
+    let html = String::from_utf8(export_pdf(pdf, "html")).unwrap();
+    assert!(html.contains("<h2>Heading 1</h2>") && html.contains("<p>Heading 1</p>"), "{html}");
+}
