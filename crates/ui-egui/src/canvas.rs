@@ -4503,21 +4503,14 @@ fn notices(
     let scripts_off = doc.xfa_scripts_off();
     // Only the ordinary fillable-field hint is optional. Skipping it must still allow
     // security, repair and XFA warnings through, and never set the general dismissal flag.
-    let form_reminder = show_form_field_reminder
-        && !scripts_off
-        && !secured
-        && xfa.is_none()
-        && info.xfa.is_none()
-        && info.fields.iter().any(|f| f.kind != pdfcraft_render::FieldKind::PushButton);
+    let fillable_form = info.fields.iter().any(|f| f.kind != pdfcraft_render::FieldKind::PushButton);
+    let form_reminder = show_form_field_reminder && !scripts_off && !secured && xfa.is_none() && info.xfa.is_none() && fillable_form;
     // Restoring this hint must not be blocked by, or clear, a dismissed repair warning.
     if view.notice_dismissed && !form_reminder {
         return None;
     }
-    let msg = if scripts_off {
-        Some(("triangle-alert", crate::js_ui::scripts_off_notice(), true))
-    } else if secured {
-        Some(("lock", tl!("This document is secured. Some changes are restricted by its security settings.").to_string(), false))
-    } else if let Some(x) = xfa {
+    // What the document is as a form, if it is one: what the bar says first, secured or not.
+    let form = if let Some(x) = xfa {
         let lang = crate::i18n::current();
         let pages = crate::i18n::trn(lang, x.pages as u64, "{n} page", "{n} pages");
         let fields = crate::i18n::trn(lang, x.fields as u64, "{n} field", "{n} fields");
@@ -4541,13 +4534,28 @@ fn notices(
             tl!("XFA form: its fields and its XFA data are kept in step, so other viewers show what you fill in.").to_string(),
             true,
         ))
-    } else if form_reminder {
+    } else if fillable_form && (show_form_field_reminder || secured) {
         // Push buttons alone (LaTeX `animate` frames, navigation buttons) leave nothing to fill in.
         Some((
             "text-cursor-input",
             crate::i18n::fmt(tl!("This document contains {n} interactive form fields."), &[("n", &info.fields.len().to_string())]),
             true,
         ))
+    } else {
+        None
+    };
+    let msg = if scripts_off {
+        Some(("triangle-alert", crate::js_ui::scripts_off_notice(), true))
+    } else if secured {
+        // A secured form still says what it is, and keeps Highlight fields: the security
+        // sentence follows the form's.
+        let security = tl!("This document is secured. Some changes are restricted by its security settings.");
+        Some(match form {
+            Some((icon, text, fields)) => (icon, format!("{text} {security}"), fields),
+            None => ("lock", security.to_string(), false),
+        })
+    } else if form.is_some() {
+        form
     } else if repaired {
         Some(("bandage", tl!("This file was damaged and has been repaired. Saving keeps the repaired version.").to_string(), false))
     } else if !info.warnings.is_empty() {

@@ -123,6 +123,8 @@ preference off for all open and future documents, including after a restart. Tur
 back on to restore it immediately. Older settings default to showing the reminder; malformed
 values are ignored. This does not change field highlighting or hide security, repair, signature
 or XFA notices, and it does not modify the PDF.
+Secured forms retain their combined form/security notice and field-highlighting controls with
+either reminder preference. Closing that security notice dismisses it only for the current view.
 
 The opt-in UI control channel uses `ui.set` with `key=form-reminder`, `value=on|off`; the same
 option is available as `pdfcraft --form-reminder off`. `ui.state.show_form_field_reminder`

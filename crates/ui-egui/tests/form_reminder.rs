@@ -168,9 +168,32 @@ fn a_hidden_form_reminder_does_not_hide_security_notices() {
     })
     .unwrap();
     let bytes = pdfcraft_cos::write_full(&doc, &Default::default()).unwrap();
-    let h = harness(Some(r#"{"show_form_field_reminder":false}"#.to_string()), bytes);
-    h.get_by_label("This document is secured. Some changes are restricted by its security settings.");
-    h.get_by_label("Security settings");
+    for show in [true, false] {
+        let saved = serde_json::json!({"show_form_field_reminder":show}).to_string();
+        let mut h = harness(Some(saved), bytes.clone());
+        let id = h.state().views[0].id;
+        h.get_by_label_contains("interactive form fields. This document is secured. Some changes are restricted by its security settings.");
+        h.get_by_label("Security settings");
+        let before = h.state().views[0].highlight_fields;
+        let label = if before { "Hide field highlights" } else { "Highlight fields" };
+        h.get_by_label(label).click();
+        h.run_steps(4);
+        assert_eq!(h.state().views[0].highlight_fields, !before);
+        assert_eq!(h.state().session.get(id).unwrap().bytes.as_ref(), bytes.as_slice());
+        assert!(!h.state().session.get(id).unwrap().dirty);
+        if !show {
+            shot(&mut h, "secured-form-with-reminder-off");
+        }
+        h.get_by_label("Dismiss").click();
+        h.run_steps(4);
+        assert!(h.query_by_label_contains("This document is secured").is_none());
+        assert!(h.state().views[0].notice_dismissed);
+        let saved = h.state().persist();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&saved).unwrap()["show_form_field_reminder"], show);
+        let h = harness(Some(saved), bytes.clone());
+        h.get_by_label_contains("interactive form fields. This document is secured.");
+        h.get_by_label("Security settings");
+    }
 }
 
 /// XFA status and disabled-script warnings keep their existing dismissal behaviour.
