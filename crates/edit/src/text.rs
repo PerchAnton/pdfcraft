@@ -785,7 +785,7 @@ fn positioned_tracking(shown: &mut [Shown]) {
 // Distinguish operator-index boundaries from structure paragraph identities.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ContentScope {
-    Content(usize),
+    Content { stream: usize, op: usize },
     Structure(usize),
 }
 
@@ -802,6 +802,10 @@ struct Carry {
     ts: Ts,
     stack: Vec<Ts>,
     marked: Vec<MarkedScope>,
+    // A form inherits this context; its local EMC operators cannot close the caller's span.
+    parent: MarkedScope,
+    // Zero for page content; a unique stream number for each drawn form.
+    scope_stream: usize,
 }
 
 impl Carry {
@@ -819,12 +823,12 @@ impl Carry {
             rise: 0.0,
             render_mode: 0,
         };
-        Carry { ts, stack: Vec::new(), marked: Vec::new() }
+        Carry { ts, stack: Vec::new(), marked: Vec::new(), parent: MarkedScope::default(), scope_stream: 0 }
     }
 }
 
-/// A `Do` met while interpreting: its operator index, XObject name and the state there.
-type Invocation = (usize, Vec<u8>, Ts);
+/// A `Do` met while interpreting: its operator index, XObject name, state and marked context there.
+type Invocation = (usize, Vec<u8>, Ts, MarkedScope);
 
 // Resolve a marked-content ID within a page or form without depending on a11y.
 type HeadingResolver<'a> = dyn Fn(Option<pdfcraft_cos::ObjRef>, i64) -> Option<(usize, u8)> + 'a;
@@ -870,10 +874,10 @@ fn interpret(
                     .and_then(Object::as_int)
                     .and_then(|mcid| logical_text.and_then(|p| p.heading_levels).and_then(|f| f(mcid)))
                     .filter(|(_, level)| *level <= 6);
-                let parent = marked.last().copied().unwrap_or_default();
+                let parent = marked.last().copied().unwrap_or(carry.parent);
                 marked.push(MarkedScope {
                     scope: heading_level.map(|(owner, _)| ContentScope::Structure(owner)).or(if region {
-                        Some(ContentScope::Content(i))
+                        Some(ContentScope::Content { stream: carry.scope_stream, op: i })
                     } else {
                         parent.scope
                     }),
@@ -962,7 +966,7 @@ fn interpret(
             b"Tr" => ts.render_mode = op.operands.first().and_then(Object::as_int).unwrap_or(-1),
             b"Do" => {
                 if let (Some(list), Some(name)) = (invoked.as_deref_mut(), op.name(0)) {
-                    list.push((i, name.to_vec(), ts.clone()));
+                    list.push((i, name.to_vec(), ts.clone(), marked.last().copied().unwrap_or(carry.parent)));
                 }
             }
             b"Td" | b"TD" => {
@@ -1089,6 +1093,7 @@ fn interpret(
                 if !pieces.iter().any(|p| matches!(p, Object::String(s) if !s.bytes.is_empty())) {
                     continue;
                 }
+                let mark = marked.last().copied().unwrap_or(carry.parent);
                 out.push(Shown {
                     op: i,
                     extra_ops: Vec::new(),
@@ -1117,8 +1122,8 @@ fn interpret(
                     italic: m.italic,
                     visual_order: m.visual_order,
                     decodable,
-                    scope: marked.last().and_then(|m| m.scope),
-                    heading_level: marked.last().and_then(|m| m.heading_level),
+                    scope: mark.scope,
+                    heading_level: mark.heading_level,
                     logical_order: false,
                     actual_text: false,
                 });
@@ -1439,8 +1444,8 @@ fn reading_lines(doc: &Document, page: usize, levels: Option<&HeadingResolver<'_
         let mut last_stream = None;
         let mut forms = invoked.into_iter().peekable();
         for s in shown {
-            while let Some((_, name, ts)) = forms.next_if(|f| f.0 < s.op) {
-                enter(w, resources, &name, ts);
+            while let Some((_, name, ts, parent)) = forms.next_if(|f| f.0 < s.op) {
+                enter(w, resources, &name, ts, parent);
                 // Text after a form starts a new line.
                 last = None;
             }
@@ -1451,16 +1456,16 @@ fn reading_lines(doc: &Document, page: usize, levels: Option<&HeadingResolver<'_
             }
             add_shown(&mut w.lines, &mut last, s, si);
         }
-        for (_, name, ts) in forms {
-            enter(w, resources, &name, ts);
+        for (_, name, ts, parent) in forms {
+            enter(w, resources, &name, ts, parent);
         }
     }
-    fn enter(w: &mut Walk, resources: &Dict, name: &[u8], ts: Ts) {
+    fn enter(w: &mut Walk, resources: &Dict, name: &[u8], ts: Ts, parent: MarkedScope) {
         let Some(form) = form_call(w.doc, resources, name, ts.ctm, &w.path, &mut w.budget) else { return };
         let ops = parse(&form.data).ops;
         // The form starts with the graphics state at its `Do`, its own matrix applied.
-        let mut carry = Carry { ts: Ts { ctm: form.ctm, ..ts }, stack: Vec::new(), marked: Vec::new() };
         let stream = w.next_stream;
+        let mut carry = Carry { ts: Ts { ctm: form.ctm, ..ts }, stack: Vec::new(), marked: Vec::new(), parent, scope_stream: stream };
         w.next_stream = w.next_stream.saturating_add(1);
         if let Some(r) = form.obj {
             w.path.push(r);

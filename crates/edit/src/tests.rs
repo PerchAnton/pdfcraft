@@ -3037,6 +3037,104 @@ fn page_with_forms(content: &str, forms: &[(String, String)]) -> Document {
     build(&objs.iter().map(String::as_str).collect::<Vec<_>>())
 }
 
+/// #3727: each Do keeps the marked context active at that operator, even after EMC.
+#[test]
+fn form_heading_scope_is_captured_at_each_invocation() {
+    let doc = page_with_forms(
+        "/Span <</MCID 0>> BDC /A Do EMC q 1 0 0 1 0 -40 cm /Span <</MCID 1>> BDC /A Do EMC Q \
+         BT /F1 12 Tf 72 500 Td (After) Tj ET",
+        &[("A".into(), "BT /F1 12 Tf 72 650 Td (Child) Tj ET".into())],
+    );
+    let before = write_incremental(&doc, &SaveOptions::default()).unwrap();
+    let levels = |stream, mcid| match (stream, mcid) {
+        (None, 0) => Some((10, 1)),
+        (None, 1) => Some((11, 0)),
+        _ => None,
+    };
+    let read = reading_blocks_with_heading_levels(&doc, 0, &levels).unwrap();
+    assert_eq!(
+        read.blocks.iter().map(|b| (b.text.as_str(), b.heading_level)).collect::<Vec<_>>(),
+        [("Secret", None), ("Child", Some(1)), ("Child", Some(0)), ("After", None)]
+    );
+    assert!(!read.truncated);
+    assert_eq!(write_incremental(&doc, &SaveOptions::default()).unwrap(), before);
+}
+
+#[test]
+fn form_heading_scope_reaches_nested_forms_and_returns_to_the_page() {
+    let doc = page_with_forms(
+        "/Span <</MCID 0>> BDC /A Do EMC BT /F1 12 Tf 72 450 Td (After) Tj ET",
+        &[
+            ("A".into(), "/B Do BT /F1 12 Tf 72 550 Td (Outer) Tj ET".into()),
+            ("B".into(), "/C Do".into()),
+            ("C".into(), "/Span BMC BT /F1 12 Tf 72 650 Td (Inner) Tj ET EMC".into()),
+        ],
+    );
+    let levels = |stream: Option<pdfcraft_cos::ObjRef>, mcid| (stream.is_none() && mcid == 0).then_some((10, 2));
+    let read = reading_blocks_with_heading_levels(&doc, 0, &levels).unwrap();
+    assert_eq!(
+        read.blocks.iter().map(|b| (b.text.as_str(), b.heading_level)).collect::<Vec<_>>(),
+        [("Secret", None), ("Inner", Some(2)), ("Outer", Some(2)), ("After", None)]
+    );
+}
+
+#[test]
+fn form_heading_scope_yields_to_own_marks_and_resumes_after_them() {
+    let doc = page_with_forms(
+        "/Span <</MCID 0>> BDC /A Do EMC",
+        &[
+            (
+                "A".into(),
+                "BT /F1 12 Tf 72 650 Td (Parent) Tj ET \
+             /Span <</MCID 0>> BDC /B Do EMC \
+             /Span <</MCID 1>> BDC BT /F1 12 Tf 72 550 Td (Own heading) Tj ET EMC \
+             BT /F1 12 Tf 72 500 Td (Parent again) Tj ET"
+                    .into(),
+            ),
+            ("B".into(), "BT /F1 24 Tf 72 600 Td (Body) Tj ET".into()),
+        ],
+    );
+    let form = pdfcraft_cos::ObjRef::new(7, 0);
+    let levels = |stream, mcid| match (stream, mcid) {
+        (None, 0) => Some((10, 1)),
+        (Some(r), 0) if r == form => Some((11, 0)),
+        (Some(r), 1) if r == form => Some((12, 3)),
+        _ => None,
+    };
+    let read = reading_blocks_with_heading_levels(&doc, 0, &levels).unwrap();
+    assert_eq!(
+        read.blocks.iter().map(|b| (b.text.as_str(), b.heading_level)).collect::<Vec<_>>(),
+        [("Secret", None), ("Parent", Some(1)), ("Body", Some(0)), ("Own heading", Some(3)), ("Parent again", Some(1))]
+    );
+}
+
+#[test]
+fn form_heading_scope_survives_an_unmatched_local_emc() {
+    let doc = page_with_forms("/Span <</MCID 0>> BDC /A Do EMC", &[("A".into(), "EMC BT /F1 12 Tf 72 650 Td (Child) Tj ET".into())]);
+    let levels = |stream: Option<pdfcraft_cos::ObjRef>, mcid| (stream.is_none() && mcid == 0).then_some((10, 1));
+    let read = reading_blocks_with_heading_levels(&doc, 0, &levels).unwrap();
+    assert_eq!(read.blocks.iter().map(|b| (b.text.as_str(), b.heading_level)).collect::<Vec<_>>(), [("Secret", None), ("Child", Some(1))]);
+}
+
+#[test]
+fn form_heading_scope_distinguishes_local_boundaries_from_the_parent() {
+    let doc = page_with_forms(
+        "/P BMC /A Do EMC",
+        &[(
+            "A".into(),
+            "BT /F1 12 Tf 72 650 Td (First) Tj ET \
+            /P BMC BT /F1 12 Tf 72 636 Td (Second) Tj ET EMC"
+                .into(),
+        )],
+    );
+    let read = reading_blocks_checked(&doc, 0).unwrap();
+    assert_eq!(
+        read.blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(),
+        ["Secret", "First", "Second"],
+        "equal operator indexes in a page and a form do not identify the same paragraph"
+    );
+}
+
 /// #3120: export reads text from forms as deep and as often as the renderer draws them, and says
 /// when a limit left some out: a text form drawn 5 000 times (past the old budget of 4 096) or
 /// forms nested 13 deep (past the old 12) lost the form drawn after them, silently.

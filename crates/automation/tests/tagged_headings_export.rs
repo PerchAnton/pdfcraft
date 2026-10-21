@@ -263,3 +263,117 @@ fn broken_structure_cycles_fall_back_without_changing_the_input() {
     let html = String::from_utf8(export_pdf(pdf, "html")).unwrap();
     assert!(html.contains("<h2>Heading 1</h2>") && html.contains("<p>Heading 1</p>"), "{html}");
 }
+
+fn inherited_form_pdf(depth: usize, own_level: Option<u8>, tail: bool) -> Vec<u8> {
+    use pdfcraft_cos::{Dict, ObjRef, Object, Stream};
+    assert!(depth > 0);
+    modified_pdf(|doc| {
+        let content = source_content(doc);
+        let (first, rest) = content.split_once('\n').unwrap();
+        let text = first.strip_prefix("/Span <</MCID 0>> BDC ").unwrap().strip_suffix(" EMC").unwrap();
+        let resources = doc.get(ObjRef::new(3, 0)).as_dict().unwrap().get(b"Resources").unwrap().as_dict().unwrap().clone();
+        let mut next = None;
+        for level in 0..depth {
+            let mut local = resources.clone();
+            let mut body = if let Some(inner) = next {
+                let mut objects = Dict::new();
+                objects.set("N", Object::Ref(inner));
+                local.set("XObject", Object::Dict(objects));
+                "/N Do".to_owned()
+            } else if own_level.is_some() {
+                format!("/Span <</MCID 0>> BDC {text} EMC")
+            } else {
+                text.to_owned()
+            };
+            if level == 0 && tail {
+                body.push_str(" BT /F1 12 Tf 50 740 Td (Restored heading) Tj ET");
+            }
+            let mut dict = Dict::new();
+            dict.set("Type", Object::name("XObject"));
+            dict.set("Subtype", Object::name("Form"));
+            dict.set("BBox", Object::Array(vec![0, 0, 612, 842].into_iter().map(Object::Int).collect()));
+            dict.set("Resources", Object::Dict(local));
+            if level == 0 && own_level.is_some() {
+                dict.set("StructParents", Object::Int(1));
+            }
+            let form = doc.add(Object::Stream(Stream::flate(dict, body.as_bytes())));
+            if level == 0
+                && let Some(heading) = own_level
+            {
+                let mut mcr = Dict::new();
+                mcr.set("Type", Object::name("MCR"));
+                mcr.set("Pg", Object::Ref(ObjRef::new(3, 0)));
+                mcr.set("Stm", Object::Ref(form));
+                mcr.set("MCID", Object::Int(0));
+                let mut tag = Dict::new();
+                tag.set("Type", Object::name("StructElem"));
+                let role = if heading == 0 { "P".to_owned() } else { format!("H{heading}") };
+                tag.set("S", Object::name(&role));
+                tag.set("P", Object::Ref(ObjRef::new(8, 0)));
+                tag.set("K", Object::Dict(mcr));
+                let tag = doc.add(Object::Dict(tag));
+                doc.update_dict(ObjRef::new(8, 0), |d| d.set("K", Object::Array(vec![Object::Int(0), Object::Ref(tag)]))).unwrap();
+                doc.update_dict(ObjRef::new(16, 0), |d| {
+                    let mut nums = d.get(b"Nums").unwrap().as_array().unwrap().to_vec();
+                    nums.extend([Object::Int(1), Object::Array(vec![Object::Ref(tag)])]);
+                    d.set("Nums", Object::Array(nums));
+                })
+                .unwrap();
+            }
+            next = Some(form);
+        }
+        let mut objects = Dict::new();
+        objects.set("F", Object::Ref(next.unwrap()));
+        let mut resources = resources;
+        resources.set("XObject", Object::Dict(objects));
+        doc.update_dict(ObjRef::new(3, 0), |d| d.set("Resources", Object::Dict(resources))).unwrap();
+        set_content(doc, &format!("/Span <</MCID 0>> BDC /F Do EMC\n{rest}"));
+    })
+}
+
+fn assert_form_export_level(output: &[u8], ext: &str, text: &str, level: u8) {
+    if ext == "html" {
+        let html = std::str::from_utf8(output).unwrap();
+        let tag = if level == 0 { "p".to_owned() } else { format!("h{level}") };
+        let paragraph = html.lines().find(|line| line.contains(&format!(">{text}</"))).unwrap();
+        assert!(paragraph.contains(&format!("<{tag}>{text}</{tag}>")), "{paragraph}");
+    } else {
+        let xml = part(output, "word/document.xml");
+        let paragraph = xml.split("<w:p>").find(|p| p.contains(&format!(">{text}</w:t>"))).unwrap();
+        if level == 0 {
+            assert!(!paragraph.contains("<w:pStyle"), "{paragraph}");
+        } else {
+            assert!(paragraph.contains(&format!("<w:pStyle w:val=\"Heading{level}\"/>")), "{paragraph}");
+        }
+    }
+}
+
+#[test]
+fn form_export_inherits_a_page_heading_through_unmarked_nested_forms() {
+    for depth in [1, 3] {
+        for ext in ["html", "docx"] {
+            let output = export_pdf(inherited_form_pdf(depth, None, false), ext);
+            assert_form_export_level(&output, ext, "Heading 1", 1);
+            assert_form_export_level(&output, ext, "Heading 2", 2);
+        }
+    }
+}
+
+#[test]
+fn form_export_own_heading_and_paragraph_override_the_page_heading() {
+    for level in [0, 3] {
+        for ext in ["html", "docx"] {
+            let output = export_pdf(inherited_form_pdf(2, Some(level), false), ext);
+            assert_form_export_level(&output, ext, "Heading 1", level);
+        }
+    }
+}
+
+#[test]
+fn form_export_restores_the_parent_heading_after_its_own_paragraph() {
+    for ext in ["html", "docx"] {
+        let output = export_pdf(inherited_form_pdf(2, Some(0), true), ext);
+        assert_form_export_level(&output, ext, "Heading 1", 0);
+        assert_form_export_level(&output, ext, "Restored heading", 1);
+    }
+}
