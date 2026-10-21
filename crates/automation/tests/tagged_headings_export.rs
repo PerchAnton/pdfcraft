@@ -377,3 +377,28 @@ fn form_export_restores_the_parent_heading_after_its_own_paragraph() {
         assert_form_export_level(&output, ext, "Restored heading", 1);
     }
 }
+
+/// Invalid role-map values leave inherited headings and valid aliases usable in both exports.
+#[test]
+fn malformed_large_rolemap_values_keep_inherited_and_aliased_export_levels() {
+    use pdfcraft_cos::{Dict, ObjRef, Object, PdfString};
+    let pdf = modified_pdf(|doc| {
+        let mut payload = Dict::new();
+        payload.set("Ignored", Object::String(PdfString::literal(vec![b'x'; 256 * 1024])));
+        let mut roles = Dict::new();
+        roles.set("Broken", Object::Array(vec![Object::Dict(payload)]));
+        roles.set("Chapter", Object::Ref(doc.add(Object::name("H4"))));
+        let mut inherited = Dict::new();
+        inherited.set("S", Object::name("Broken"));
+        inherited.set("K", Object::Int(0));
+        let inherited = doc.add(Object::Dict(inherited));
+        doc.update_dict(ObjRef::new(8, 0), |d| d.set("K", Object::Array(vec![Object::Ref(inherited); 256]))).unwrap();
+        doc.update_dict(ObjRef::new(9, 0), |d| d.set("S", Object::name("Chapter"))).unwrap();
+        doc.update_dict(ObjRef::new(6, 0), |d| d.set("RoleMap", Object::Dict(roles))).unwrap();
+    });
+    for ext in ["html", "docx"] {
+        let output = export_pdf(pdf.clone(), ext);
+        assert_form_export_level(&output, ext, "Heading 1", 1);
+        assert_form_export_level(&output, ext, "Heading 2", 4);
+    }
+}

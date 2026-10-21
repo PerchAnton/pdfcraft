@@ -172,6 +172,8 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
+- **2026-10-21 (M10, #3659):** Structure-role lookup no longer copies malformed direct RoleMap payloads on every export visit. Direct names are borrowed and indirect names share their cached object; alias limits, inherited heading levels and Office fidelity estimates are unchanged.
+
 - **2026-10-21 (M10, #3659):** Text drawn by nested Form XObjects inherits the enclosing heading or paragraph level during Word/HTML export; a form's own tagged level takes precedence. The inherited context survives local EMC, and literal paragraph boundaries stay separate between page and form streams. Estimates unchanged.
 
 - **2026-10-20 (M10, #3659):** Word and HTML export preserve explicit H1–H6 structure levels and keep tagged P as body text, using page/form MCIDs rather than matching titles. RoleMap and nested spans are covered; untagged or unnumbered H retains size inference. Structure traversal is bounded; general Office layout fidelity and estimates are unchanged.

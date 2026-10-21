@@ -107,7 +107,7 @@ pub fn heading_levels(doc: &Document) -> HeadingLevels {
                     } else if let Some(kind) = d.name(b"S") {
                         let kind = standard(self.doc, self.roles, kind);
                         let owner = object.map_or(self.visits, |r| *self.owners.entry(r).or_insert(self.visits));
-                        let level = match kind.as_slice() {
+                        let level = match kind.as_ref() {
                             [b'H', n @ b'1'..=b'6'] => Some((owner, n - b'0')),
                             b"P" => Some((owner, 0)),
                             b"H" => None,
