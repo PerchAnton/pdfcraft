@@ -399,6 +399,7 @@ mod tests {
                 size: [228.0, 150.0],
                 rotation: 0.0,
             }],
+            background: None,
         }
     }
 
@@ -526,6 +527,7 @@ mod tests {
                 cell("100%", 200.0, 320.0),
             ],
             images: Vec::new(),
+            background: None,
         };
         let bytes = pptx(&[sample_page(), table_page], "Two");
         let parts = entries(&bytes);
@@ -624,7 +626,7 @@ mod tests {
         let images = (0..40)
             .map(|k| Image { ext: "png", bytes: vec![0; 4], rect: [0.0, -1e300, 1e-300, 1e300 - k as f64], size: [1.0, 1.0], rotation: 0.0 })
             .collect();
-        let p = Page { width: f64::MAX, height: f64::NAN, blocks, images };
+        let p = Page { width: f64::MAX, height: f64::NAN, blocks, images, background: None };
         let bytes = pptx(&[p], "Hostile");
         let slide = part(&bytes, "ppt/slides/slide1.xml");
         assert!(slide.contains("Title") && slide.contains("<p:pic>"), "the slide is still written");
@@ -705,6 +707,7 @@ mod tests {
                 cell("100%", 200.0, 320.0, 100.0, 12.0),
             ],
             images: Vec::new(),
+            background: None,
         };
         let bytes = pptx(&[p], "Table Check");
         let slide_xml = part(&bytes, "ppt/slides/slide1.xml");
