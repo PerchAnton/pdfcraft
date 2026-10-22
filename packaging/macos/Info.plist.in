@@ -37,6 +37,17 @@
     <string>tr</string>
     <string>lt</string>
     <string>vi</string>
+    <string>ckb</string>
+    <string>id</string>
+    <string>fi</string>
+    <string>sq</string>
+    <string>th</string>
+    <string>ca</string>
+    <string>ro</string>
+    <string>lo</string>
+    <string>hi</string>
+    <string>ko</string>
+    <string>nb</string>
   </array>
   <key>CFBundleDisplayName</key>
   <string>PdfCraft</string>
