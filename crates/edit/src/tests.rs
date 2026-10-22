@@ -1631,12 +1631,7 @@ fn mixed_script_runs_use_source_and_fallback_advances_for_alignment() {
 #[test]
 fn mixed_script_paragraph_batches_only_missing_glyphs_and_refuses_atomically() {
     let mut doc = text_page("BT /F1 12 Tf 72 700 Td (Latin text) Tj ET");
-    let before = write_full(&doc, &Default::default()).unwrap();
-    if pdfcraft_fonts::document_japanese_font().is_none() {
-        assert!(text::replace_block(&mut doc, 0, 0, "Latin шалом text").is_err());
-        assert_eq!(write_full(&doc, &Default::default()).unwrap(), before);
-        return;
-    }
+    // Cyrillic also uses bundled Inter in builds without craft-fonts.
     text::rewrite_block_with_limit(&mut doc, 0, 0, Some("Latin шалом text"), &Default::default(), 2).unwrap();
     assert_eq!(page_font_programs(&doc).iter().filter(|(subtype, _)| subtype == b"Type3").count(), 3);
     let before = write_full(&doc, &Default::default()).unwrap();
