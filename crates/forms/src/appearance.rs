@@ -13,8 +13,9 @@
 //! Acrobat keeps a value its field font can't show: the value itself is stored as typed,
 //! [`field_appearance_drawn`] returns the first such character, and the caller marks the widget
 //! (`pdfcraft_fonts::UNDRAWN_MARK`) and asks other viewers to redraw the field
-//! (`/NeedAppearances`). Widths use the approximate metrics of `pdfcraft-fonts` (Helvetica, or one
-//! em per full-width character in composite fonts).
+//! (`/NeedAppearances`). Widths are the field font's own (its `/Widths`, or the standard-14
+//! metrics), Helvetica's when Helvetica stands in, and one em per full-width character in
+//! composite fonts.
 //! The mutable filling/authoring path first tries this existing selection, then embeds the
 //! bundled OFL Inter face if it covers all displayed text that would otherwise lose characters.
 //! That appearance uses its real advances and Unicode mapping; the source font and /DA stay
@@ -197,7 +198,12 @@ impl FontText {
 
     fn width(&self, s: &str, size: f64) -> f64 {
         match self {
-            Self::WinAnsi | Self::Simple(_) => helvetica_width(s, size),
+            Self::WinAnsi => helvetica_width(s, size),
+            // The font's `/Widths`, or its standard-14 metrics (Courier, Times) when it has none.
+            Self::Simple(metrics) => match metrics.encode(&s.replace(['\t', '\r', '\n'], " ")) {
+                Some(bytes) => metrics.codes(&bytes).iter().map(|&(code, _)| metrics.width(code)).sum::<f64>() * size,
+                None => helvetica_width(s, size),
+            },
             Self::Unicode(_) => cjk_width(s, size),
             Self::Embedded(metrics) => {
                 let bytes = self.encode(&s.replace(['\n', '\r'], " "));
@@ -230,6 +236,28 @@ fn dr_font(doc: &Document, name: &str) -> Option<(Object, FontText)> {
     Some((entry, FontText::Simple(Box::new(Metrics::from_dict(doc, fd)))))
 }
 
+/// A push button's caption, centered in a `width` × `height` box, in the font, size and color its
+/// `/DA` asks for: the font from the form's `/DR`, else Helvetica, and the size `auto` when the
+/// `/DA` leaves it to the viewer (0). Returns the content operators, the font resource (name and
+/// object), and the first character drawn as `?` because the font can't show it.
+pub(crate) fn button_caption(doc: &Document, da: &str, caption: &str, width: f64, height: f64, auto: f64) -> (Vec<u8>, String, Object, Option<char>) {
+    let da = parse_da(da);
+    let (name, font, enc) = match dr_font(doc, &da.font).filter(|(_, enc)| enc.can_encode(caption)) {
+        Some((o, enc)) => (da.font.clone(), o, enc),
+        None => ("Helv".to_string(), helvetica(), FontText::WinAnsi),
+    };
+    let missing = enc.first_unencodable(caption);
+    let size = if da.size > 0.0 { da.size } else { auto };
+    let tw = enc.width(caption, size);
+    let mut out =
+        format!("BT /{name} {size:.2} Tf {} 1 0 0 1 {:.3} {:.3} Tm ", da.color, (width - tw) / 2.0, (height - size * 0.7) / 2.0).into_bytes();
+    out.extend(literal(&enc.encode(caption)));
+    out.extend_from_slice(b" Tj ET\n");
+    (out, name, font, missing)
+}
+
+/// A non-embedded Helvetica font dictionary in WinAnsi encoding, the fallback when the form's
+/// `/DR` has no font that can show the text.
 fn helvetica() -> Object {
     let mut f = Dict::new();
     f.set(b"Type".to_vec(), Object::name("Font"));
@@ -629,20 +657,20 @@ fn field_appearance_using(
             }
         }
     }
-    let mut content = c.into_bytes();
-    content.extend(
-        format!(
-            "/Tx BMC\nq\n{} {} {} {} re W n\nBT\n/{} {} Tf\n{}\n",
-            n(bw),
-            n(bw),
-            n(width - 2.0 * bw),
-            n(height - 2.0 * bw),
-            font_name,
-            n(size),
-            da.color
-        )
-        .bytes(),
-    );
+    // Acrobat regenerates only what is inside /Tx BMC when it redraws a field (e.g. on focus
+    // changes), discarding what came before it (issues #1613, #633). The background and border
+    // therefore go inside the marked-content block too, so a redraw keeps them with the text.
+    let mut content = format!(
+        "/Tx BMC\nq\n{c}{} {} {} {} re W n\nBT\n/{} {} Tf\n{}\n",
+        n(bw),
+        n(bw),
+        n(width - 2.0 * bw),
+        n(height - 2.0 * bw),
+        font_name,
+        n(size),
+        da.color
+    )
+    .into_bytes();
     content.extend(body);
     content.extend_from_slice(b"ET\nQ\nEMC\n");
     let mut fonts = Dict::new();
