@@ -1,6 +1,6 @@
 # PdfCraft roadmap
 
-> **Last reviewed:** 2026-10-24 | **Last updated:** 2026-10-24 | **Change:** minor (M14 #4253: annotation pin persistence and isolated form-save regressions; estimates unchanged)
+> **Last reviewed:** 2026-10-24 (UTC+03:00) | **Last updated:** 2026-10-24 (UTC+03:00) | **Change:** minor (M14 #4253: annotation pin persistence and isolated form-save regressions; estimates unchanged)
 
 **Stage: alpha** · next: beta, ~25% (ready for real work 50% → 75%) and ~400–700 h away
 
