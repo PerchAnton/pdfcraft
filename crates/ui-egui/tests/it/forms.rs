@@ -500,11 +500,38 @@ fn wait_for_file(h: &mut Harness<'static, PdfCraftApp>, path: &std::path::Path) 
     h.run_steps(1);
 }
 
+/// Each caller owns a fresh directory, even when parallel tests use the same case label.
 fn scratch(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("pdfcraft-forms-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    for _ in 0..128 {
+        let dir = std::env::temp_dir().join(format!("pdfcraft-forms-{name}-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        match std::fs::create_dir(&dir) {
+            Ok(()) => return dir,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => panic!("creating form test directory: {error}"),
+        }
+    }
+    panic!("no unused form test directory after 128 attempts");
+}
+
+/// Parallel form tests may use the same case label and output filename without sharing files.
+#[test]
+fn scratch_directories_with_the_same_label_keep_their_own_saved_files() {
+    let first = scratch("same-frame");
+    std::fs::write(first.join("saved.pdf"), b"first saved form").unwrap();
+    let second = scratch("same-frame");
+    std::fs::write(second.join("saved.pdf"), b"second saved form").unwrap();
+    let first_saved = std::fs::read(first.join("saved.pdf"));
+    let second_saved = std::fs::read(second.join("saved.pdf"));
+    let _ = std::fs::remove_dir_all(&first);
+    let _ = std::fs::remove_dir_all(&second);
+    assert_eq!(
+        first_saved.expect("the first saved form still exists"),
+        b"first saved form",
+        "another scratch caller must not overwrite the first saved form"
+    );
+    assert_eq!(second_saved.unwrap(), b"second saved form");
 }
 
 #[test]
