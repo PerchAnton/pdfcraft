@@ -1673,16 +1673,9 @@ fn control_open_replies_pending_while_the_worker_opens_and_focuses_once_it_has()
 
     // The worker completes the open on later frames; the tab shows, and only then does a
     // repeated open focus it instead of reporting another pending open.
-    let mut documents = 0;
-    for _ in 0..30 {
-        h.run_steps(1);
-        let state = ok(&mut h, &c, "ui.state", json!({}));
-        documents = state["documents"].as_array().map(|d| d.len()).unwrap_or_default();
-        if documents == 1 {
-            break;
-        }
-    }
-    assert_eq!(documents, 1, "the pending open completed into a tab");
+    // Fast headless frames are not a time budget for the background worker (notably on
+    // FreeBSD and Windows CI). Wait for completion with the shared bounded, yielding wait.
+    super::support::wait_until(&mut h, "the pending control open", |app| app.views.len() == 1);
 
     let again = ok(&mut h, &c, "ui.open", json!({ "path": a }));
     assert_eq!(again["focused"], true, "{again}");
