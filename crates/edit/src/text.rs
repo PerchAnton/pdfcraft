@@ -934,6 +934,7 @@ struct Carry {
 const MAX_PAGE_TEXT: usize = 16 << 20;
 
 impl Carry {
+    /// Initialize identity graphics state, empty marked-content scopes, and the page glyph-text budget.
     fn new() -> Self {
         let ts = Ts {
             ctm: Matrix::IDENTITY,
@@ -979,6 +980,7 @@ struct TextProperties<'a> {
 /// The advance is an error message when the font's writing mode can't be read.
 type CachedFont = (Rc<Metrics>, Option<String>, Result<Option<f64>, String>);
 
+/// Interpret text operators while carrying graphics and marked-content state and charging glyph text to the page budget.
 fn interpret(
     doc: &Document,
     ops: &[Op],
@@ -2652,6 +2654,7 @@ pub fn reading_blocks_with_heading_levels(doc: &Document, page: usize, levels: &
     reading_blocks_with_levels(doc, page, Some(levels))
 }
 
+/// Extract and group reading lines with optional structure-derived paragraph scopes and levels.
 fn reading_blocks_with_levels(doc: &Document, page: usize, levels: Option<&HeadingResolver<'_>>) -> Result<ReadingBlocks, EditError> {
     let (lines, truncated) = reading_lines(doc, page, levels)?;
     Ok(ReadingBlocks { blocks: regions::group_reading_blocks(&lines), truncated })
@@ -3386,6 +3389,7 @@ pub(crate) fn translate_blocks(doc: &mut Document, page: usize, indexes: &[usize
 mod tests {
     use super::*;
 
+    /// Build a synthetic text block for reading-order and layout regressions.
     fn block(text: &str, rect: [f64; 4]) -> TextBlock {
         TextBlock {
             text: text.into(),

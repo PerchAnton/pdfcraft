@@ -2,6 +2,7 @@
 
 use super::*;
 
+/// Require compatible transforms, paint context, and structure scope before grouping text.
 fn same_plane(a: &TextLine, b: &TextLine) -> bool {
     let at = Matrix(a.origin.tm).then(&Matrix(a.origin.ctm));
     let bt = Matrix(b.origin.tm).then(&Matrix(b.origin.ctm));
@@ -189,6 +190,7 @@ fn starts_list_item(row: &[usize], lines: &[TextLine]) -> bool {
     row.iter().filter_map(|i| lines.get(*i)).map(|l| l.text.trim_start()).find(|t| !t.is_empty()).is_some_and(opens_with_marker)
 }
 
+/// Group compatible runs into rows and blocks without crossing structure paragraph boundaries.
 fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
     let mut rows: Vec<Vec<usize>> = Vec::new();
     for (i, line) in lines.iter().enumerate() {

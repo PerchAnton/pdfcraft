@@ -69,6 +69,7 @@ pub(crate) enum RoleName<'a> {
 }
 
 impl AsRef<[u8]> for RoleName<'_> {
+    /// Borrow the resolved role name without copying direct bytes or the cached indirect object.
     fn as_ref(&self) -> &[u8] {
         match self {
             Self::Borrowed(name) => name,
@@ -360,6 +361,7 @@ pub fn figures(doc: &Document) -> Vec<Figure> {
         .collect()
 }
 
+/// Require a dictionary whose role resolves to Figure through the structure root's RoleMap.
 fn check_figure(doc: &Document, obj: ObjRef) -> Result<Dict, AltError> {
     let root = tree_root(doc).ok_or(AltError::Untagged)?;
     let role_map = root.get(b"RoleMap").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).unwrap_or_default();
@@ -617,10 +619,12 @@ mod role_tests {
     use super::*;
     use std::sync::Arc;
 
+    /// Create a minimal synthetic document for role-resolution regressions.
     fn document() -> Document {
         Document::open(Arc::new(b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [] /Count 0 >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n".to_vec())).unwrap()
     }
 
+    /// Keep the original borrowed role when a direct alias has a malformed value.
     #[test]
     fn malformed_direct_roles_keep_the_original_name_without_copying() {
         let doc = document();
@@ -637,6 +641,7 @@ mod role_tests {
         }
     }
 
+    /// Resolve direct aliases by borrowing the target name bytes.
     #[test]
     fn direct_role_aliases_share_the_target_name() {
         let doc = document();
@@ -649,6 +654,7 @@ mod role_tests {
         assert!(std::ptr::eq(name, roles.name(b"Alias").unwrap()), "a direct alias must not duplicate name storage");
     }
 
+    /// Keep an indirect role's cached object alive rather than copying its name.
     #[test]
     fn indirect_role_aliases_share_the_resolved_name() {
         let mut doc = document();
@@ -662,6 +668,7 @@ mod role_tests {
         assert!(std::ptr::eq(name, held.as_name().unwrap()), "an indirect alias must share its cached object");
     }
 
+    /// Retain the original role for malformed indirect values and unsupported reference chains.
     #[test]
     fn malformed_indirect_roles_and_reference_chains_keep_the_fallback() {
         let mut doc = document();
@@ -677,6 +684,7 @@ mod role_tests {
         }
     }
 
+    /// Preserve standard roles and the existing alias-depth and cycle fallback rules.
     #[test]
     fn role_alias_limits_cycles_and_standard_roles_keep_their_semantics() {
         let doc = document();

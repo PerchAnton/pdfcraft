@@ -3,6 +3,7 @@ use pdfcraft_automation::{Automation, Content};
 use serde_json::{Value, json};
 use std::io::Read;
 
+/// Run an automation tool and require a successful JSON result for this fixture.
 fn call(a: &mut Automation, tool: &str, args: Value) -> Value {
     a.call(tool, &args)
         .unwrap()
@@ -14,6 +15,7 @@ fn call(a: &mut Automation, tool: &str, args: Value) -> Value {
         .unwrap()
 }
 
+/// Build a synthetic PDF whose structure roles disagree with font-size heading guesses.
 fn tagged_pdf() -> Vec<u8> {
     let mut content = String::new();
     let mut elements = Vec::new();
@@ -68,6 +70,7 @@ fn tagged_pdf() -> Vec<u8> {
     out
 }
 
+/// Read one XML member from an exported Office ZIP package.
 fn part(zip: &[u8], name: &str) -> String {
     let mut at = 0;
     while zip.get(at..at + 4) == Some(b"PK\x03\x04") {
@@ -85,10 +88,12 @@ fn part(zip: &[u8], name: &str) -> String {
     panic!("missing ZIP member {name}");
 }
 
+/// Export the standard tagged fixture through the requested automation tool.
 fn export(ext: &str) -> Vec<u8> {
     export_pdf(tagged_pdf(), ext)
 }
 
+/// Open supplied PDF bytes and export them through the automation API.
 fn export_pdf(input: Vec<u8>, ext: &str) -> Vec<u8> {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("headings.pdf"), &input).unwrap();
@@ -101,6 +106,7 @@ fn export_pdf(input: Vec<u8>, ext: &str) -> Vec<u8> {
     std::fs::read(dir.path().join(format!("headings.{ext}"))).unwrap()
 }
 
+/// Export explicit H1-H6 levels and paragraphs to HTML regardless of their font sizes.
 #[test]
 fn html_export_preserves_tagged_heading_levels() {
     let html = String::from_utf8(export("html")).unwrap();
@@ -110,6 +116,7 @@ fn html_export_preserves_tagged_heading_levels() {
     assert!(html.contains("<p>Heading 1</p>"), "a large tagged P stays a paragraph: {html}");
 }
 
+/// Export explicit heading levels into Word paragraph styles.
 #[test]
 fn word_export_preserves_tagged_heading_levels() {
     let zip = export("docx");
@@ -127,20 +134,24 @@ fn word_export_preserves_tagged_heading_levels() {
     assert!(!copies[1].contains("<w:pStyle"), "a large P does not become a heading: {}", copies[1]);
 }
 
+/// Apply a synthetic document mutation and serialize the resulting PDF.
 fn modified_pdf(edit: impl FnOnce(&mut pdfcraft_cos::Document)) -> Vec<u8> {
     let mut doc = pdfcraft_cos::Document::open(std::sync::Arc::new(tagged_pdf())).unwrap();
     edit(&mut doc);
     pdfcraft_cos::write_full(&doc, &pdfcraft_cos::SaveOptions::default()).unwrap()
 }
+/// Read the original fixture's page content for controlled stream mutations.
 fn source_content(doc: &pdfcraft_cos::Document) -> String {
     let stream = doc.get(pdfcraft_cos::ObjRef::new(5, 0));
     let pdfcraft_cos::Object::Stream(stream) = &*stream else { panic!("content stream") };
     String::from_utf8(stream.decoded().unwrap()).unwrap()
 }
+/// Replace the fixture page's content with one synthetic stream.
 fn set_content(doc: &mut pdfcraft_cos::Document, content: &str) {
     doc.set(pdfcraft_cos::ObjRef::new(5, 0), pdfcraft_cos::Stream::flate(pdfcraft_cos::Dict::new(), content.as_bytes()));
 }
 
+/// Keep one aliased heading together through nested spans and split content streams.
 #[test]
 fn rolemapped_heading_keeps_nested_spans_across_content_streams_together() {
     use pdfcraft_cos::{Dict, ObjRef, Object, Stream};
@@ -185,6 +196,7 @@ fn rolemapped_heading_keeps_nested_spans_across_content_streams_together() {
     assert!(!html.contains(">Head</") && !html.contains(">ing 1</"), "{html}");
 }
 
+/// Keep form and page MCID roles distinct in both HTML and Word export.
 #[test]
 fn form_and_page_marks_with_the_same_mcid_keep_distinct_roles() {
     use pdfcraft_cos::{Dict, ObjRef, Object, Stream};
@@ -235,6 +247,7 @@ fn form_and_page_marks_with_the_same_mcid_keep_distinct_roles() {
     }
 }
 
+/// Retain size-based heading inference for untagged content and unnumbered H roles.
 #[test]
 fn untagged_and_unnumbered_headings_keep_the_size_heuristic() {
     use pdfcraft_cos::{ObjRef, Object};
@@ -254,6 +267,7 @@ fn untagged_and_unnumbered_headings_keep_the_size_heuristic() {
     assert!(html.contains("<h2>Heading 1</h2>") && html.contains("<p>Heading 1</p>"), "{html}");
 }
 
+/// Fall back on cyclic structure data while leaving input PDF bytes unchanged.
 #[test]
 fn broken_structure_cycles_fall_back_without_changing_the_input() {
     use pdfcraft_cos::{ObjRef, Object};
@@ -264,6 +278,7 @@ fn broken_structure_cycles_fall_back_without_changing_the_input() {
     assert!(html.contains("<h2>Heading 1</h2>") && html.contains("<p>Heading 1</p>"), "{html}");
 }
 
+/// Build nested form invocations with an optional local heading or paragraph override.
 fn inherited_form_pdf(depth: usize, own_level: Option<u8>, tail: bool) -> Vec<u8> {
     use pdfcraft_cos::{Dict, ObjRef, Object, Stream};
     assert!(depth > 0);
@@ -331,6 +346,7 @@ fn inherited_form_pdf(depth: usize, own_level: Option<u8>, tail: bool) -> Vec<u8
     })
 }
 
+/// Check the expected form heading semantics in both HTML and Word output.
 fn assert_form_export_level(output: &[u8], ext: &str, text: &str, level: u8) {
     if ext == "html" {
         let html = std::str::from_utf8(output).unwrap();
@@ -348,6 +364,7 @@ fn assert_form_export_level(output: &[u8], ext: &str, text: &str, level: u8) {
     }
 }
 
+/// Inherit a page heading through form invocations without local marked content.
 #[test]
 fn form_export_inherits_a_page_heading_through_unmarked_nested_forms() {
     for depth in [1, 3] {
@@ -359,6 +376,7 @@ fn form_export_inherits_a_page_heading_through_unmarked_nested_forms() {
     }
 }
 
+/// Let a form's explicit heading or paragraph override the invoking page heading.
 #[test]
 fn form_export_own_heading_and_paragraph_override_the_page_heading() {
     for level in [0, 3] {
@@ -369,6 +387,7 @@ fn form_export_own_heading_and_paragraph_override_the_page_heading() {
     }
 }
 
+/// Resume the inherited heading after a form closes its own paragraph scope.
 #[test]
 fn form_export_restores_the_parent_heading_after_its_own_paragraph() {
     for ext in ["html", "docx"] {

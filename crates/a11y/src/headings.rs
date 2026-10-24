@@ -76,6 +76,7 @@ impl Walker<'_> {
         d.contains(b"S").then(|| (k.as_ref(), d))
     }
 
+    /// Collect headings with inherited pages and section depth while enforcing traversal limits.
     fn walk(&mut self, k: &Object, pg: Option<ObjRef>, sections: u8, depth: usize) {
         if !self.enter(k, depth) {
             return;

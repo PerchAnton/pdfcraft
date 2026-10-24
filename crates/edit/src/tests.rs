@@ -4,6 +4,7 @@ use pdfcraft_cos::{Document, SaveOptions, write_full, write_incremental};
 
 use super::*;
 
+/// Keep explicit heading scopes from merging text across optional-content boundaries.
 #[test]
 fn tagged_heading_runs_keep_optional_content_boundaries() {
     let read = |second_layer: &str| {
@@ -18,6 +19,7 @@ fn tagged_heading_runs_keep_optional_content_boundaries() {
     assert_eq!(read("Second"), [("A".to_owned(), Some(3)), ("B".to_owned(), Some(3))]);
 }
 
+/// Group nested marks belonging to one structure paragraph into one export block.
 #[test]
 fn export_levels_keep_nested_marks_of_one_paragraph_together() {
     let doc = text_page(
@@ -44,6 +46,7 @@ fn export_levels_keep_nested_marks_of_one_paragraph_together() {
     assert!(reading_blocks_checked(&doc, 0).unwrap().blocks.iter().all(|b| b.heading_level.is_none()));
 }
 
+/// Keep distinct paragraph identities separate even when their heading levels match.
 #[test]
 fn distinct_structure_paragraphs_with_the_same_level_do_not_merge() {
     let doc = text_page(
@@ -3693,6 +3696,7 @@ fn form_heading_scope_is_captured_at_each_invocation() {
     assert_eq!(write_incremental(&doc, &SaveOptions::default()).unwrap(), before);
 }
 
+/// Propagate a heading into nested forms and restore the page scope after invocation.
 #[test]
 fn form_heading_scope_reaches_nested_forms_and_returns_to_the_page() {
     let doc = page_with_forms(
@@ -3711,6 +3715,7 @@ fn form_heading_scope_reaches_nested_forms_and_returns_to_the_page() {
     );
 }
 
+/// Allow local form marks to override an inherited heading and restore it afterward.
 #[test]
 fn form_heading_scope_yields_to_own_marks_and_resumes_after_them() {
     let doc = page_with_forms(
@@ -3741,6 +3746,7 @@ fn form_heading_scope_yields_to_own_marks_and_resumes_after_them() {
     );
 }
 
+/// Prevent an unmatched form-local EMC from closing the inherited page heading.
 #[test]
 fn form_heading_scope_survives_an_unmatched_local_emc() {
     let doc = page_with_forms("/Span <</MCID 0>> BDC /A Do EMC", &[("A".into(), "EMC BT /F1 12 Tf 72 650 Td (Child) Tj ET".into())]);
@@ -3749,6 +3755,7 @@ fn form_heading_scope_survives_an_unmatched_local_emc() {
     assert_eq!(read.blocks.iter().map(|b| (b.text.as_str(), b.heading_level)).collect::<Vec<_>>(), [("Secret", None), ("Child", Some(1))]);
 }
 
+/// Distinguish form-local marked-content boundaries from the inherited parent scope.
 #[test]
 fn form_heading_scope_distinguishes_local_boundaries_from_the_parent() {
     let doc = page_with_forms(

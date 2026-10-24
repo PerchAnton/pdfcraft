@@ -31,7 +31,8 @@ impl HeadingLevels {
     }
 }
 
-/// Read the structure tree once, with bounded depth, work and retained entries.
+/// Read the structure tree with limits on depth, visits and retained entries.
+/// Dictionary and role lookups still depend on the input dictionaries' sizes.
 /// Inline elements, inherited /Pg, nested spans, MCR dictionaries and RoleMap are supported.
 pub fn heading_levels(doc: &Document) -> HeadingLevels {
     struct Walker<'a> {
@@ -44,6 +45,7 @@ pub fn heading_levels(doc: &Document) -> HeadingLevels {
         owners: HashMap<ObjRef, usize>,
     }
     impl Walker<'_> {
+        /// Record a paragraph scope and level, permanently discarding conflicting claims to the same mark.
         fn mark(&mut self, page: Option<ObjRef>, stream: Option<ObjRef>, mcid: i64, level: Option<(usize, u8)>) {
             let (Some(page), Some(level)) = (page, level) else { return };
             if mcid < 0 {
@@ -61,6 +63,7 @@ pub fn heading_levels(doc: &Document) -> HeadingLevels {
             }
         }
 
+        /// Traverse structure children with inherited page and paragraph scope, cycle checks, and visit limits.
         fn walk(
             &mut self,
             item: &Object,
@@ -146,6 +149,7 @@ mod tests {
     use pdfcraft_cos::{Dict, Object};
     use std::sync::Arc;
 
+    /// Create a minimal page document for synthetic structure-tree tests.
     fn doc() -> (Document, ObjRef, ObjRef) {
         let bytes = Arc::new(b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [] /Count 0 >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n".to_vec());
         let mut doc = Document::open(bytes).unwrap();
@@ -155,6 +159,7 @@ mod tests {
         doc.update_dict(catalog, |d| d.set("StructTreeRoot", Object::Ref(root))).unwrap();
         (doc, page, root)
     }
+    /// Build a synthetic structure element with a role, page, and child content.
     fn element(kind: &str, page: ObjRef, kids: Object) -> Object {
         let mut d = Dict::new();
         d.set("S", Object::name(kind));
@@ -162,10 +167,12 @@ mod tests {
         d.set("K", kids);
         Object::Dict(d)
     }
+    /// Attach test structure children and a RoleMap to the document catalog.
     fn attach(doc: &mut Document, root: ObjRef, kids: Vec<Object>) {
         doc.update_dict(root, |d| d.set("K", Object::Array(kids))).unwrap();
     }
 
+    /// Resolve heading aliases across inline and indirect elements and inherit levels through nested spans.
     #[test]
     fn levels_follow_rolemap_inline_and_indirect_elements_and_nested_spans() {
         let (mut doc, page, root) = doc();
@@ -191,6 +198,7 @@ mod tests {
         assert_eq!(heading_levels(&doc).get(page, None, 0), Some(3));
     }
 
+    /// Distinguish identical MCIDs belonging to different pages or form streams.
     #[test]
     fn mcr_stream_and_page_identity_do_not_collide() {
         let (mut doc, page, root) = doc();
@@ -210,6 +218,7 @@ mod tests {
         assert_eq!(levels.get(other_page, None, 7), None);
     }
 
+    /// Fall back when tags are malformed, conflicting, cyclic, or lack numbered heading semantics.
     #[test]
     fn malformed_ambiguous_and_cyclic_tags_leave_no_override() {
         let (mut doc, page, root) = doc();
@@ -232,6 +241,7 @@ mod tests {
         assert_eq!(levels.get(page, None, 1), Some(6));
     }
 
+    /// Stop excessive structure nesting and cyclic role aliases without producing an override.
     #[test]
     fn excessive_depth_and_rolemap_cycles_are_bounded() {
         let (mut doc, page, root) = doc();
@@ -249,6 +259,7 @@ mod tests {
         assert_eq!(levels.get(page, None, 1), None);
     }
 
+    /// Preserve shared paragraph identity while stopping repeated references at the visit limit.
     #[test]
     fn repeated_aliases_keep_their_identity_and_exhaust_the_work_budget() {
         let (mut doc, page, root) = doc();

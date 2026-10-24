@@ -615,6 +615,7 @@ fn picture_xml(n: usize, name: &str, (cx, cy): (i64, i64), rotation: Option<f64>
     )
 }
 
+/// Emit positioned Word text and images, retaining explicit heading styles without reserving body space.
 fn positioned_page<'a>(page: &'a Page, media: &mut Vec<(String, &'a Image)>, shape_id: &mut usize) -> String {
     // One 1 pt paragraph anchors the whole page. Shapes never reserve body space, so even a
     // page-sized watermark cannot push the invoice footer onto another page.
@@ -986,6 +987,7 @@ mod tests {
         assert!(out.contains("\\cf3000 ") || out.contains("\\cf3000\\"), "the last colour has the last slot");
     }
 
+    /// Build a synthetic export page for package and layout regressions.
     fn page() -> Page {
         let b = |t: &str, y: f64, size: f64, bold: bool| Block {
             text: t.into(),
@@ -1067,6 +1069,7 @@ mod tests {
         assert!(xml.contains("position:absolute"), "an image over text floats: {xml}");
     }
 
+    /// Keep overlapping positioned artwork from pushing invoice body content to another page.
     #[test]
     fn word_overlap_does_not_consume_invoice_body_space() {
         let mut p = table_page();
@@ -1110,6 +1113,7 @@ mod tests {
         assert_eq!(xml.matches(">Meter</w:t>").count(), 2);
     }
 
+    /// Keep explicit heading paragraph styles in positioned Word text boxes.
     #[test]
     fn positioned_word_text_keeps_explicit_heading_levels() {
         let mut heading = block("Small heading", 72.0, 650.0, 180.0, 662.0);
@@ -1162,6 +1166,7 @@ mod tests {
         panic!("{name} missing")
     }
 
+    /// Produce well-formed Word output for control characters and long page content.
     #[test]
     fn word_opens_text_with_control_characters_and_long_pages() {
         // #72: text extracted without a usable /ToUnicode holds C0 controls, which XML forbids;
@@ -1219,6 +1224,7 @@ mod tests {
         assert!(html(&[t], "Grid").contains("style=\"color:#FF0000\""));
     }
 
+    /// Check RTF character escaping and font-size output.
     #[test]
     fn rtf_escapes_and_sizes() {
         let mut p = page();
@@ -1316,6 +1322,7 @@ mod tests {
         assert_eq!(slide_xml.matches("<a:tr ").count(), 4);
     }
 
+    /// Avoid treating staggered text blocks as one oversized table.
     #[test]
     fn a_staircase_of_blocks_is_not_a_huge_table() {
         // Row k holds blocks in columns k and k + 1: every column has two members and every row
@@ -1343,6 +1350,7 @@ mod tests {
         assert!(started.elapsed() < std::time::Duration::from_secs(5), "took {:?}", started.elapsed());
     }
 
+    /// Keep Word tables within their supported column limit.
     #[test]
     fn word_opens_tables_up_to_its_column_limit() {
         // Rows of short numbers on a regular grid, n columns wide.
@@ -1375,6 +1383,7 @@ mod tests {
         assert_eq!(grid_cols(&grid(64)), 0);
     }
 
+    /// Build a synthetic styled text block for table and reading-order tests.
     fn block(t: &str, x0: f64, y0: f64, x1: f64, y1: f64) -> Block {
         Block { text: t.into(), rect: [x0, y0, x1, y1], size: 12.0, bold: false, italic: false, color: [0.0; 3], rotation: 0.0, heading_level: None }
     }
@@ -1445,6 +1454,7 @@ mod tests {
         assert!(h.contains("30,000") && h.contains("15,000"), "{h}");
     }
 
+    /// Keep ordinary two-column prose out of table inference.
     #[test]
     fn two_column_body_text_is_not_mistaken_for_a_table() {
         let para = |t: &str, x: f64, y: f64| Block {
