@@ -60,6 +60,7 @@ impl ObjectStream {
         result
     }
 
+    /// Decode an object stream using the caller's shared diagnostic budget for dictionary and member warnings.
     pub(crate) fn new_with_log(
         stream: &Stream, max_decompressed_size: Option<usize>, load_log: &ObjectLoadLog,
     ) -> Result<ObjectStream> {

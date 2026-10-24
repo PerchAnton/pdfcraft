@@ -373,6 +373,7 @@ fn recover_stream_length(input: ParserInput) -> Option<(ParserInput, ParserInput
     recovered
 }
 
+/// Parse a stream and resolve indirect lengths using the enclosing read's diagnostic budget.
 fn stream<'a>(
     input: ParserInput<'a>, reader: &Reader, already_seen: &mut HashSet<ObjectId>, recover_length: bool,
     recovery_bound: Option<usize>, load_log: &crate::reader::ObjectLoadLog,
@@ -467,6 +468,7 @@ pub fn direct_object(input: ParserInput) -> Option<Object> {
     strip_nom(_direct_object(crate::reader::MAX_NESTING_DEPTH)(input))
 }
 
+/// Parse one direct object while forwarding the diagnostic context for stream lookups.
 fn object<'a>(
     input: ParserInput<'a>, reader: &Reader, already_seen: &mut HashSet<ObjectId>, recover_stream_length: bool,
     recovery_bound: Option<usize>, load_log: &crate::reader::ObjectLoadLog,
@@ -490,6 +492,7 @@ fn object<'a>(
     .parse(input)
 }
 
+/// Parse an indirect object with its recovery bound and silent lookup diagnostics.
 pub fn indirect_object(
     input: ParserInput, offset: usize, expected_id: Option<ObjectId>, reader: &Reader,
     already_seen: &mut HashSet<ObjectId>, recovery_bound: Option<usize>,
@@ -528,6 +531,7 @@ pub(crate) fn indirect_object_with_log(
     Ok((id, object))
 }
 
+/// Parse an indirect-object body and forward the read budget into nested stream parsing.
 fn _indirect_object<'a>(
     input: ParserInput<'a>, offset: usize, expected_id: Option<ObjectId>, reader: &Reader,
     already_seen: &mut HashSet<ObjectId>, recovery: (bool, Option<usize>), load_log: &crate::reader::ObjectLoadLog,
@@ -655,6 +659,7 @@ fn trailer(input: ParserInput) -> NomResult<Dictionary> {
     delimited(pair(tag(&b"trailer"[..]), space), dictionary, space).parse(input)
 }
 
+/// Parse a cross-reference table or stream without starting an object-load diagnostic batch.
 pub fn xref_and_trailer(input: ParserInput, reader: &Reader) -> crate::Result<(Xref, Dictionary)> {
     let xref_trailer = map(pair(|i| xref(i, reader.strict), trailer), |(mut xref, trailer)| {
         xref.size = trailer

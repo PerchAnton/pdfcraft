@@ -52,6 +52,7 @@ impl ObjectLoadLog {
         }
     }
 
+    /// Increment a diagnostic counter without wrapping at usize::MAX.
     fn increment(counter: &AtomicUsize) -> usize {
         // Member diagnostics can exceed the xref count. Saturate even if a
         // hostile graph revisits a stream, rather than wrapping the budget.
@@ -60,6 +61,7 @@ impl ObjectLoadLog {
             .unwrap_or_else(|n| n)
     }
 
+    /// Count a diagnostic unless silent, returning whether its detail fits the shared allowance.
     fn message(&self, counter: &AtomicUsize) -> bool {
         if self.silent {
             return false;
@@ -68,27 +70,33 @@ impl ObjectLoadLog {
         Self::increment(&self.messages) < MAX_OBJECT_LOAD_MESSAGES
     }
 
+    /// Count an object-load failure and decide whether to emit its detail.
     fn object(&self) -> bool {
         self.message(&self.failures)
     }
 
+    /// Count a failed object-stream container as both a stream and an object failure.
     fn stream(&self) -> bool {
         Self::increment(&self.streams);
         self.object()
     }
 
+    /// Count a stream-length error against the shared detail allowance.
     fn length(&self) -> bool {
         self.message(&self.lengths)
     }
 
+    /// Count an object-stream warning against the shared detail allowance.
     pub(crate) fn warning(&self) -> bool {
         self.message(&self.warnings)
     }
 
+    /// Count a skipped encrypted container against the shared detail allowance.
     fn encrypted(&self) -> bool {
         self.message(&self.encrypted)
     }
 
+    /// Emit one exact summary if details were suppressed, preserving error severity when needed.
     pub(crate) fn finish(&self) {
         let messages = self.messages.load(Ordering::Relaxed);
         if messages <= MAX_OBJECT_LOAD_MESSAGES {
@@ -923,6 +931,7 @@ impl Reader<'_> {
         Ok(self.document)
     }
 
+    /// Load encrypted containers with one budget, keeping skipped containers nonfatal in strict mode.
     fn load_encrypted_document(&mut self, _filter_func: Option<FilterFunc>) -> Result<()> {
         // First, extract all raw object bytes without parsing
         let entries: Vec<_> = self
@@ -1052,6 +1061,7 @@ impl Reader<'_> {
         self.document.reference_table = xref;
     }
 
+    /// Load objects and finish their shared diagnostic batch before propagating a strict error.
     fn load_objects_raw(&mut self, filter_func: Option<FilterFunc>) -> Result<()> {
         let load_log = ObjectLoadLog::default();
         let result = self.load_objects_raw_with_log(filter_func, &load_log);
@@ -1061,6 +1071,7 @@ impl Reader<'_> {
         result
     }
 
+    /// Load normal and compressed objects and deferred stream lengths through one diagnostic context.
     fn load_objects_raw_with_log(&mut self, filter_func: Option<FilterFunc>, load_log: &ObjectLoadLog) -> Result<()> {
         let is_encrypted = self.document.trailer.get(b"Encrypt").is_ok();
         let zero_length_streams = Mutex::new(vec![]);
@@ -1197,6 +1208,7 @@ impl Reader<'_> {
         Ok(())
     }
 
+    /// Resolve a stream length and copy only a validated, in-bounds content range.
     fn read_stream_content(&mut self, object_id: ObjectId, load_log: &ObjectLoadLog) -> Result<()> {
         let length = self.get_stream_length(object_id, load_log)?;
         let stream = self
@@ -1220,6 +1232,7 @@ impl Reader<'_> {
         Ok(())
     }
 
+    /// Resolve an integer-valued stream length, reporting lookup failures through the caller's budget.
     fn get_stream_length(&self, object_id: ObjectId, load_log: &ObjectLoadLog) -> Result<i64> {
         let object = self.document.get_object(object_id)?;
         let stream = object.as_stream()?;
@@ -1286,6 +1299,7 @@ impl Reader<'_> {
         object_stream.objects.get(&id).cloned().ok_or(Error::MissingXrefEntry)
     }
 
+    /// Resolve an object quietly when no enclosing eager-read diagnostic batch exists.
     pub fn get_object(&self, id: ObjectId, already_seen: &mut HashSet<ObjectId>) -> Result<Object> {
         self.get_object_with_log(id, already_seen, &ObjectLoadLog::silent())
     }
@@ -1339,6 +1353,7 @@ impl Reader<'_> {
         Ok(obj)
     }
 
+    /// Resolve encryption metadata without starting standalone diagnostic batches.
     fn parse_encryption_dictionary(&mut self) -> Result<()> {
         if let Ok(encrypt_ref) = self.document.trailer.get(b"Encrypt").and_then(|o| o.as_reference()) {
             if self.raw_objects.is_empty() {
@@ -1463,6 +1478,7 @@ impl Reader<'_> {
         Ok(((obj_num, obj_gen), raw_bytes))
     }
 
+    /// Find the next normal-object boundary and parse with that recovery limit and read budget.
     fn read_object(
         &self, offset: usize, expected_id: Option<ObjectId>, already_seen: &mut HashSet<ObjectId>,
         load_log: &ObjectLoadLog,
@@ -1482,6 +1498,7 @@ impl Reader<'_> {
             .min(self.buffer.len())
     }
 
+    /// Parse at an offset with the supplied recovery boundary and diagnostic context.
     fn read_object_to(
         &self, offset: usize, end: usize, expected_id: Option<ObjectId>, already_seen: &mut HashSet<ObjectId>,
         load_log: &ObjectLoadLog,
@@ -2218,6 +2235,7 @@ fn object_marker_parsing_accepts_only_real_headers() {
 #[cfg(test)]
 mod encrypted_load_logging {
     use super::*;
+    /// Keep encrypted skips nonfatal in strict mode while sharing one bounded diagnostic batch.
     #[test]
     fn encrypted_skips_share_the_budget_and_stay_nonfatal_in_strict_mode() {
         // Exercise the eager reader's encrypted-skip branch directly. Public

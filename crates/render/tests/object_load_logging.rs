@@ -12,17 +12,21 @@ static RECORDS: Mutex<Vec<(Level, String)>> = Mutex::new(Vec::new());
 static INIT: Once = Once::new();
 struct Capture;
 impl Log for Capture {
+    /// Capture only diagnostics emitted by the compatibility reader.
     fn enabled(&self, metadata: &Metadata<'_>) -> bool {
         metadata.target().starts_with("lopdf::")
     }
+    /// Record matching messages and severity for the serialized test capture.
     fn log(&self, record: &Record<'_>) {
         if self.enabled(record.metadata()) {
             RECORDS.lock().unwrap_or_else(|e| e.into_inner()).push((record.level(), record.args().to_string()));
         }
     }
+    /// Keep captured records until the test explicitly clears them.
     fn flush(&self) {}
 }
 
+/// Install the shared logger once and clear records under the caller's test lock.
 fn start_capture() {
     INIT.call_once(|| {
         log::set_logger(&Capture).unwrap();
@@ -31,10 +35,12 @@ fn start_capture() {
     RECORDS.lock().unwrap_or_else(|e| e.into_inner()).clear();
 }
 
+/// Snapshot captured diagnostics, recovering the test mutex after poisoning.
 fn records() -> Vec<(Level, String)> {
     RECORDS.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
+/// Build a readable synthetic page with requested malformed objects and stream containers.
 fn fixture(bad_objects: usize, bad_streams: usize) -> Vec<u8> {
     // The page is readable even though unrelated indirect objects are not.
     let names = if bad_objects > 0 { " /Names 6 0 R" } else { "" };
@@ -51,6 +57,7 @@ fn fixture(bad_objects: usize, bad_streams: usize) -> Vec<u8> {
     pdf_with_objects(objects)
 }
 
+/// Serialize synthetic indirect objects with a classic cross-reference table.
 fn pdf_with_objects(objects: Vec<Vec<u8>>) -> Vec<u8> {
     let mut pdf = b"%PDF-1.7\n".to_vec();
     let mut offsets = Vec::new();
@@ -69,6 +76,7 @@ fn pdf_with_objects(objects: Vec<Vec<u8>>) -> Vec<u8> {
     pdf
 }
 
+/// Misplace startxref to exercise compatibility inspection and its diagnostic budget.
 fn compatibility_fixture() -> Vec<u8> {
     // A known producer mistake: startxref points just after "xref", so COS records a repair
     // and inspect uses the eager compatibility reader. The ordinary parser repairs it too.
@@ -78,6 +86,7 @@ fn compatibility_fixture() -> Vec<u8> {
     format!("{}startxref\n{}\n%%EOF\n", &pdf[..start], xref + 4).into_bytes()
 }
 
+/// Require eight error details, one exact summary, and no unbudgeted messages.
 fn assert_bounded(messages: &[(Level, String)], total: usize, streams: usize) {
     let details = messages.iter().filter(|(_, s)| s.starts_with("Object load error") || s.starts_with("Object stream load error")).count();
     assert_eq!(details, 8, "expected bounded details, captured {} records", messages.len());
@@ -89,6 +98,7 @@ fn assert_bounded(messages: &[(Level, String)], total: usize, streams: usize) {
     assert!(messages.iter().all(|(level, _)| *level == Level::Error));
 }
 
+/// Keep a readable page while summarizing 1,250 malformed objects in nine records.
 #[test]
 fn malformed_objects_log_bounded_details_and_an_exact_summary() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -99,6 +109,7 @@ fn malformed_objects_log_bounded_details_and_an_exact_summary() {
     assert_bounded(&records(), 1250, 0);
 }
 
+/// Count ordinary and compressed-object failures in the same eight-detail allowance.
 #[test]
 fn ordinary_and_object_stream_failures_share_one_log_budget() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -108,6 +119,7 @@ fn ordinary_and_object_stream_failures_share_one_log_budget() {
     assert_bounded(&records(), 50, 30);
 }
 
+/// Give each compatibility inspection its own budget while retaining the xref repair warning.
 #[test]
 fn compatibility_inspection_gets_a_fresh_budget_on_every_open() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -123,6 +135,7 @@ fn compatibility_inspection_gets_a_fresh_budget_on_every_open() {
     }
 }
 
+/// Keep healthy reads silent and preserve every diagnostic within the allowance.
 #[test]
 fn healthy_and_small_damaged_files_keep_their_diagnostics() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -138,6 +151,7 @@ fn healthy_and_small_damaged_files_keep_their_diagnostics() {
     }
 }
 
+/// Preserve strict read errors while bounding diagnostics from concurrent workers.
 #[test]
 fn strict_loading_still_refuses_malformed_objects() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -152,6 +166,7 @@ fn strict_loading_still_refuses_malformed_objects() {
     }
 }
 
+/// Give concurrent documents separate detail allowances and summary totals.
 #[test]
 fn concurrent_document_reads_have_independent_budgets() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -167,6 +182,7 @@ fn concurrent_document_reads_have_independent_budgets() {
 
 // Missing/broken indirect Length leaves a deferred stream; its later lookup also
 // belongs to this read's budget, even though eager object collection has finished.
+/// Charge missing and broken indirect lengths to the original read budget.
 #[test]
 fn deferred_stream_length_errors_share_the_load_budget() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -185,6 +201,7 @@ fn deferred_stream_length_errors_share_the_load_budget() {
     }
 }
 
+/// Build synthetic object-stream members with bad, duplicate, or empty offsets.
 fn member_stream(count: usize, kind: &str) -> Vec<u8> {
     let index: String = (0..count)
         .map(|i| {
@@ -202,6 +219,7 @@ fn member_stream(count: usize, kind: &str) -> Vec<u8> {
     format!("<< /Type /ObjStm /N {count} /First {} /Length {} >>\nstream\n{content}\nendstream", index.len(), content.len()).into_bytes()
 }
 
+/// Share one warning allowance across every object-stream member in a document.
 #[test]
 fn object_stream_member_warnings_are_bounded_across_all_streams() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -218,6 +236,7 @@ fn object_stream_member_warnings_are_bounded_across_all_streams() {
     }
 }
 
+/// Combine diagnostic categories in one summary at the highest encountered severity.
 #[test]
 fn mixed_errors_and_warnings_share_one_budget_and_summary() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -236,6 +255,7 @@ fn mixed_errors_and_warnings_share_one_budget_and_summary() {
     }
 }
 
+/// Emit exact suppressed-message totals before returning a deterministic strict failure.
 #[test]
 fn strict_error_still_reports_the_suppressed_diagnostics() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -256,6 +276,7 @@ fn strict_error_still_reports_the_suppressed_diagnostics() {
     assert!(summary.contains("993 additional messages suppressed"), "{summary}");
 }
 
+/// Preserve small diagnostic batches and retain valid members despite duplicate offsets.
 #[test]
 fn small_stream_diagnostics_keep_their_text_level_and_objects() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -279,6 +300,7 @@ fn small_stream_diagnostics_keep_their_text_level_and_objects() {
     assert_eq!(doc.get_object((10000, 0)).unwrap().as_i64().unwrap(), 42, "the first valid member survives duplicate offsets");
 }
 
+/// Bound standalone object-stream parsing, including its dictionary and member warnings.
 #[test]
 fn direct_object_stream_parsing_also_has_a_bounded_budget() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -385,6 +407,7 @@ fn encrypted_container_fixture(count: usize) -> Vec<u8> {
     encrypted_stream_fixture(count, false)
 }
 
+/// Build encrypted compressed references, optionally replacing containers with malformed streams.
 fn encrypted_stream_fixture(count: usize, broken: bool) -> Vec<u8> {
     let mut doc = Document::load_mem(&fixture(0, 0)).unwrap();
     doc.trailer.set("ID", lopdf::Object::Array(vec![lopdf::Object::string_literal("BBBBBBBBBBBBBBBB"); 2]));
@@ -476,6 +499,7 @@ fn encrypted_object_streams_share_the_load_budget() {
     }
 }
 
+/// Count malformed encrypted containers without changing the diagnostic limit.
 #[test]
 fn encrypted_container_errors_are_counted_and_bounded() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -497,6 +521,7 @@ fn encrypted_container_errors_are_counted_and_bounded() {
     }
 }
 
+/// Build cyclic or excessive indirect-Length chains that emit lookup warnings.
 fn lookup_warning_fixture(count: usize, cycle: bool) -> Vec<u8> {
     let mut objects = vec![
         b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
@@ -520,6 +545,7 @@ fn lookup_warning_fixture(count: usize, cycle: bool) -> Vec<u8> {
     String::from_utf8(pdf_with_objects(objects)).unwrap().replace("/Root 1 0 R", "/Root 1 0 R /Info 6 0 R").into_bytes()
 }
 
+/// Charge cyclic and excessive-depth lookup warnings to the enclosing read budget.
 #[test]
 fn lookup_warnings_share_the_load_budget() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -549,6 +575,7 @@ fn lookup_warnings_share_the_load_budget() {
     }
 }
 
+/// Read lightweight metadata without starting object-load diagnostic batches.
 #[test]
 fn metadata_lookup_warnings_stay_silent() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
