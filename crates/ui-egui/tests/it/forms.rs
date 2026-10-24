@@ -610,77 +610,6 @@ fn wait_for_file(h: &mut Harness<'static, PdfCraftApp>, path: &std::path::Path) 
     h.run_steps(1);
 }
 
-/// Keep each directory alive until its caller finishes, including when a save assertion unwinds.
-struct ScratchDir(std::path::PathBuf);
-
-impl std::ops::Deref for ScratchDir {
-    type Target = std::path::Path;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Drop for ScratchDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-/// Each caller owns a fresh directory, even when parallel tests use the same case label.
-fn scratch(name: &str) -> ScratchDir {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static NEXT: AtomicUsize = AtomicUsize::new(0);
-    for _ in 0..128 {
-        let dir = std::env::temp_dir().join(format!("pdfcraft-forms-{name}-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
-        match std::fs::create_dir(&dir) {
-            Ok(()) => return ScratchDir(dir),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => panic!("creating form test directory: {error}"),
-        }
-    }
-    panic!("no unused form test directory after 128 attempts");
-}
-
-/// Parallel form tests may use the same case label and output filename without sharing files.
-#[test]
-fn scratch_directories_with_the_same_label_keep_their_own_saved_files() {
-    let first = scratch("same-frame");
-    std::fs::write(first.join("saved.pdf"), b"first saved form").unwrap();
-    let second = scratch("same-frame");
-    std::fs::write(second.join("saved.pdf"), b"second saved form").unwrap();
-    let first_saved = std::fs::read(first.join("saved.pdf"));
-    let second_saved = std::fs::read(second.join("saved.pdf"));
-    assert_eq!(
-        first_saved.expect("the first saved form still exists"),
-        b"first saved form",
-        "another scratch caller must not overwrite the first saved form"
-    );
-    assert_eq!(second_saved.unwrap(), b"second saved form");
-}
-
-/// A completed save test releases its directory without needing a final cleanup statement.
-#[test]
-fn scratch_directories_are_removed_when_the_caller_finishes() {
-    let dir = scratch("cleanup");
-    let path = dir.to_path_buf();
-    std::fs::write(dir.join("saved.pdf"), b"saved form").unwrap();
-    drop(dir);
-    assert!(!path.exists(), "the scratch owner cleans up after normal completion");
-}
-
-/// Failed save assertions unwind through the directory owner too.
-#[test]
-fn scratch_directories_are_removed_when_a_save_assertion_panics() {
-    let dir = scratch("panic-cleanup");
-    let path = dir.to_path_buf();
-    std::fs::write(dir.join("saved.pdf"), b"saved form").unwrap();
-    let failure: Result<(), _> = std::panic::catch_unwind(move || {
-        let _dir = dir;
-        panic!("simulated failed save assertion");
-    });
-    assert!(failure.is_err(), "the save assertion really failed");
-    assert!(!path.exists(), "the scratch owner cleans up during unwinding");
 /// A fresh folder of its own for one test. The tests of this binary share one process id and run
 /// in parallel, and two of them name their folder "same-frame": a number taken per call keeps one
 /// test from clearing the folder another is saving into.
@@ -710,6 +639,7 @@ fn saving_while_still_typing_in_a_field_saves_the_text() {
     assert_eq!(value(&h, "name"), ["Browser Form 123"]);
     let doc = h.state().session.get(h.state().views[0].id).unwrap();
     assert!(!doc.dirty, "and the document is saved, not left with an unsaved change");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -770,6 +700,7 @@ fn tabbing_back_to_the_same_field_then_saving_keeps_the_committed_value() {
         assert_eq!(value(&h, "qty"), ["4"], "{case}: a single undo restores the original");
         h.state_mut().redo();
         assert_eq!(value(&h, "qty"), ["42"], "{case}: redo restores the committed value");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
@@ -801,6 +732,7 @@ fn close_all_saves_text_typed_in_a_tab_that_is_no_longer_active() {
     let ctx = h.ctx.clone();
     h.state_mut().resolve_close(&ctx, Some(true));
     assert_eq!(saved_value(&out, "name"), ["Typed in tab one"]);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A key press as one event (kittest's `key_press` runs a frame per queued event).
@@ -831,6 +763,7 @@ fn typing_and_saving_in_the_same_frame_saves_the_last_keystrokes() {
     let mut h = harness();
     type_then_save_in_one_frame(&mut h, "name", "Browser", egui::Event::Text(" Form 123".into()), &out);
     assert_eq!(saved_value(&out, "name"), ["Browser Form 123"]);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -842,6 +775,7 @@ fn escape_and_save_in_the_same_frame_discards_the_draft() {
     type_then_save_in_one_frame(&mut h, "name", "Discard me", key(egui::Key::Escape, egui::Modifiers::NONE), &out);
     assert_eq!(value(&h, "name"), before, "Escape cancels typing, even with ⌘S right after it");
     assert!(h.state().views[0].forms.focus.is_none());
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -868,6 +802,7 @@ fn exporting_form_data_while_typing_includes_the_text() {
     h.state_mut().save_override = Some(out.to_string_lossy().into_owned());
     h.state_mut().export_data_dialog(false, true);
     assert!(std::fs::read_to_string(&out).unwrap().contains("Exported value"));
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// One text field, `qty`, whose validation script refuses values over 100.
@@ -1041,6 +976,7 @@ fn a_rejected_value_keeps_the_typing_and_stops_the_save() {
     // And closing asks rather than dropping it.
     h.state_mut().request_close_tab(0);
     assert!(h.state().close_request.is_some());
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -1058,6 +994,7 @@ fn a_save_shortcut_pressed_while_typing_saves_only_the_document_it_was_pressed_i
     h.state_mut().open_bytes("other.pdf", None, include_bytes!("../data/form.pdf").to_vec()).unwrap();
     h.run_steps(3);
     assert!(!out.exists(), "the other document is not saved by a shortcut pressed in the first");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -1095,6 +1032,7 @@ fn refused_value_stops_save(commit_key: egui::Key, case: &str) {
     h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::S);
     h.run_steps(4);
     assert!(!out.exists());
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
