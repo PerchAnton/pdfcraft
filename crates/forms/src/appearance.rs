@@ -167,6 +167,7 @@ enum FontText {
 }
 
 impl FontText {
+    /// Encode text with the already selected field font, normalizing tabs for reusable fonts.
     fn encode(&self, s: &str) -> Vec<u8> {
         match self {
             Self::WinAnsi => win_ansi(s),
@@ -176,6 +177,7 @@ impl FontText {
         }
     }
 
+    /// Check reusable simple or embedded font coverage before choosing it for displayed text.
     fn can_encode(&self, s: &str) -> bool {
         match self {
             Self::Simple(metrics) | Self::Embedded(metrics) => metrics.encode(&s.replace('\t', " ")).is_some(),
@@ -196,6 +198,7 @@ impl FontText {
         }
     }
 
+    /// Measure text with its selected encoding and metrics at the requested point size.
     fn width(&self, s: &str, size: f64) -> f64 {
         match self {
             Self::WinAnsi => helvetica_width(s, size),
@@ -462,6 +465,7 @@ pub fn field_appearance_drawn(doc: &Document, f: &Field, w: &Widget, values: &[S
     field_appearance_using(doc, f, w, values, format, None)
 }
 
+/// Apply the field's Format action only when values have not already been formatted.
 fn formatted_values<'a>(f: &Field, values: &'a [String], format: bool) -> std::borrow::Cow<'a, [String]> {
     // The Format event: what is shown, not what is stored.
     if format
@@ -475,6 +479,7 @@ fn formatted_values<'a>(f: &Field, values: &'a [String], format: bool) -> std::b
     }
 }
 
+/// Choose combo display labels or the first value, masking password characters before drawing.
 fn displayed_text(f: &Field, values: &[String]) -> String {
     let text = if f.kind == FieldKind::Combo {
         values.iter().map(|v| f.options.iter().find(|(e, _)| e == v).map_or(v.clone(), |(_, d)| d.clone())).collect::<Vec<_>>().join(", ")
@@ -543,6 +548,7 @@ pub(crate) fn field_appearance_embedded(
     Ok(field_appearance_using(doc, f, w, values, format, Some((name, entry, enc))))
 }
 
+/// Draw a widget using an optional fallback font without rewriting its source font resource.
 fn field_appearance_using(
     doc: &Document,
     f: &Field,
