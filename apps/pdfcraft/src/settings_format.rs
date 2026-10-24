@@ -134,18 +134,22 @@ struct NativeApp {
 }
 
 impl eframe::App for NativeApp {
+    /// Forward raw input unchanged; the wrapper only changes preference publication.
     fn raw_input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
         self.app.raw_input_hook(ctx, input);
     }
 
+    /// Run the inner application's frame logic without changing its lifecycle.
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.app.logic(ctx, frame);
     }
 
+    /// Draw the inner application with the original UI and frame.
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.app.ui(ui, frame);
     }
 
+    /// Save the inner app, then publish synchronously before native termination can bypass the loop.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         self.app.save(storage);
         // Cocoa's terminate: does not return through run_native. Publish synchronously here,
@@ -155,23 +159,28 @@ impl eframe::App for NativeApp {
         }
     }
 
+    /// Forward shutdown cleanup to the inner application.
     fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
         self.app.on_exit(gl);
     }
 
+    /// Keep the inner application's autosave schedule.
     fn auto_save_interval(&self) -> std::time::Duration {
         self.app.auto_save_interval()
     }
 
+    /// Keep the inner application's background color.
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
         self.app.clear_color(visuals)
     }
 
+    /// Preserve the inner application's decision to retain egui memory.
     fn persist_egui_memory(&self) -> bool {
         self.app.persist_egui_memory()
     }
 }
 
+/// Inspect without following symlinks; accept a missing target and reject non-writable file kinds.
 fn target_metadata(path: &Path) -> std::io::Result<Option<std::fs::Metadata>> {
     match std::fs::symlink_metadata(path) {
         Ok(metadata) if metadata.is_file() && !metadata.permissions().readonly() => Ok(Some(metadata)),
@@ -181,6 +190,7 @@ fn target_metadata(path: &Path) -> std::io::Result<Option<std::fs::Metadata>> {
     }
 }
 
+/// Atomically reformat an existing writable settings map; leave a missing target untouched.
 pub fn make_readable(path: &Path) -> std::io::Result<()> {
     let Some(metadata) = target_metadata(path)? else { return Ok(()) };
     let original = read_bounded(path)?;
@@ -191,6 +201,7 @@ pub fn make_readable(path: &Path) -> std::io::Result<()> {
     replace(path, &original, &formatted, metadata.permissions())
 }
 
+/// Read at most the input limit plus one byte, rejecting oversized settings before parsing.
 fn read_bounded(path: &Path) -> std::io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
     std::fs::File::open(path)?.take(MAX_INPUT + 1).read_to_end(&mut bytes)?;
@@ -200,11 +211,14 @@ fn read_bounded(path: &Path) -> std::io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+/// Decode the legacy-compatible RON string map and format its known JSON values.
 fn readable_text(bytes: &[u8]) -> std::io::Result<Vec<u8>> {
     let values: BTreeMap<String, String> = ron::de::from_bytes(bytes).map_err(std::io::Error::other)?;
     readable_values(values)
 }
 
+/// Pretty-print known JSON objects while preserving unknown storage values and keys.
+/// Enforce the formatting budgets and let RON escape embedded raw-string delimiters.
 fn readable_values(mut values: BTreeMap<String, String>) -> std::io::Result<Vec<u8>> {
     formatting_budget(&values)?;
     for key in ["pdfcraft", "printcraft"] {
@@ -227,6 +241,7 @@ fn readable_values(mut values: BTreeMap<String, String>) -> std::io::Result<Vec<
     Ok(output.0)
 }
 
+/// Reject excessive key/value input sizes and arithmetic overflow before formatting.
 fn formatting_budget(values: &BTreeMap<String, String>) -> std::io::Result<()> {
     let size = values.iter().try_fold(0usize, |sum, (key, value)| sum.checked_add(key.len())?.checked_add(value.len()));
     if size.is_none_or(|size| size > MAX_INPUT as usize) {
@@ -235,6 +250,7 @@ fn formatting_budget(values: &BTreeMap<String, String>) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Recheck the original bytes before atomic replacement, preserving the target's permissions.
 fn replace(path: &Path, original: &[u8], formatted: &[u8], permissions: std::fs::Permissions) -> std::io::Result<()> {
     publish(
         path,
@@ -250,6 +266,8 @@ fn replace(path: &Path, original: &[u8], formatted: &[u8], permissions: std::fs:
     )
 }
 
+/// Write and sync an exclusive staging file, validate the observed target, then atomically publish.
+/// A failed writer or validation leaves the target and staging cleanup to the temporary-file owner.
 fn publish(
     path: &Path,
     permissions: Option<std::fs::Permissions>,
@@ -272,6 +290,7 @@ fn publish(
 
 struct Bounded(Vec<u8>);
 impl std::io::Write for Bounded {
+    /// Append a complete chunk only when it fits the bounded formatting output.
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
         if bytes.len() > MAX_OUTPUT.saturating_sub(self.0.len()) {
             return Err(std::io::Error::other("formatted preferences exceed the 64 MiB limit"));
@@ -280,6 +299,7 @@ impl std::io::Write for Bounded {
         Ok(bytes.len())
     }
 
+    /// No-op for the in-memory formatting buffer; publication syncs the staged file separately.
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }
@@ -291,18 +311,23 @@ mod tests {
 
     struct Memory(BTreeMap<String, String>);
     impl eframe::Storage for Memory {
+        /// Clone a stored value for the test application, matching eframe's storage interface.
         fn get_string(&self, key: &str) -> Option<String> {
             self.0.get(key).cloned()
         }
+        /// Replace one value in the in-memory storage used by native-save tests.
         fn set_string(&mut self, key: &str, value: String) {
             self.0.insert(key.to_string(), value);
         }
+        /// Remove one storage key without touching any files.
         fn remove_string(&mut self, key: &str) {
             self.0.remove(key);
         }
+        /// No-op for the test's in-memory storage, which has no pending disk writes.
         fn flush(&mut self) {}
     }
 
+    /// Require App::save to publish current preferences before native shutdown returns from its loop.
     #[test]
     fn app_save_publishes_without_waiting_for_the_native_loop_to_return() {
         let fixture = Fixture::new();
@@ -331,6 +356,7 @@ mod tests {
         }
     }
 
+    /// Create the first settings file at the original location with private permissions.
     #[test]
     fn first_save_creates_preferences_without_changing_the_location() {
         let fixture = Fixture::new();
@@ -474,6 +500,7 @@ mod tests {
         std::fs::metadata(path).unwrap().modified().unwrap()
     }
 
+    /// Keep an oversized newly saved preference even when readable formatting must fall back.
     #[test]
     fn a_new_large_snapshot_still_persists_in_compact_form() {
         let fixture = Fixture::new();
@@ -487,6 +514,7 @@ mod tests {
     }
 
     // Same map and default PrettyConfig as eframe 0.36's FileStorage::save_to_disk.
+    /// Build the same outer string map and default RON format as eframe's file storage.
     fn saved(key: &str, json: &str) -> Vec<u8> {
         ron::ser::to_string_pretty(
             &BTreeMap::from([
@@ -501,6 +529,7 @@ mod tests {
         .into_bytes()
     }
 
+    /// Expose individual JSON settings on physical lines without changing stored values or unknown keys.
     #[test]
     fn preferences_have_physical_lines_for_each_setting() {
         let original = saved("pdfcraft", r#"{"date_format":"d/m/yyyy","date_language":null,"default_zoom":"100%","javascript":false}"#);
@@ -520,6 +549,7 @@ mod tests {
         }
     }
 
+    /// Preserve legacy keys, Unicode, escapes and raw-string delimiters through repeated formatting.
     #[test]
     fn legacy_printcraft_and_special_strings_keep_their_values() {
         let value = serde_json::json!({
@@ -539,6 +569,7 @@ mod tests {
         }
     }
 
+    /// Restore legacy preferences into the real app and preserve their values in a readable save.
     #[test]
     fn legacy_preferences_restore_then_save_in_the_readable_format() {
         let legacy =
@@ -565,6 +596,7 @@ mod tests {
         }
     }
 
+    /// Reformat in place without changing permissions or leaving a staging file behind.
     #[test]
     fn file_formatting_keeps_the_schema_and_permissions() {
         let fixture = Fixture::new();
@@ -586,6 +618,7 @@ mod tests {
         }
     }
 
+    /// Reject malformed or oversized preferences without modifying existing files.
     #[test]
     fn malformed_or_large_files_are_left_alone() {
         let fixture = Fixture::new();
@@ -599,6 +632,7 @@ mod tests {
         assert!(make_readable(&fixture.0.join("missing.ron")).is_ok());
     }
 
+    /// Preserve an observed external edit and remove failed-publication staging files.
     #[test]
     fn a_changed_target_is_not_replaced_and_staging_is_cleaned_up() {
         let fixture = Fixture::new();
@@ -612,6 +646,7 @@ mod tests {
         assert_eq!(std::fs::read_dir(&fixture.0).unwrap().count(), 1);
     }
 
+    /// Refuse symlinks and read-only targets without changing the destination's contents.
     #[cfg(unix)]
     #[test]
     fn symlinks_and_readonly_files_are_left_alone() {
@@ -631,6 +666,7 @@ mod tests {
 
     struct Fixture(std::path::PathBuf);
     impl Fixture {
+        /// Create a distinct process-scoped settings directory owned by this test fixture.
         fn new() -> Self {
             use std::sync::atomic::{AtomicUsize, Ordering};
             static NEXT: AtomicUsize = AtomicUsize::new(0);
@@ -640,6 +676,7 @@ mod tests {
         }
     }
     impl Drop for Fixture {
+        /// Remove only this fixture's temporary settings directory on scope exit.
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
