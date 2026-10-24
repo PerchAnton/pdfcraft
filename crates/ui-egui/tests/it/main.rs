@@ -50,6 +50,7 @@ mod macos_localizations;
 mod marks;
 mod object_selection;
 mod ocr;
+mod organize_drag;
 mod pageboxes;
 mod panel_snapshots;
 mod pdf_links;
