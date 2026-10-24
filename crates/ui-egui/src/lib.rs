@@ -937,6 +937,7 @@ pub enum OpenOutcome {
 }
 
 impl PdfCraftApp {
+    /// Create the default application state, including enabled ordinary form reminders.
     pub fn new() -> Self {
         Self {
             session: Session::new(),

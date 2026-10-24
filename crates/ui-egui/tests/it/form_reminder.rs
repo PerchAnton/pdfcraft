@@ -7,6 +7,7 @@ use pdfcraft_ui_egui::PdfCraftApp;
 const REMINDER: &str = "This document contains 1 interactive form fields.";
 const PREFERENCE: &str = "Show form field reminder";
 
+/// Build one synthetic AcroForm text field for reminder-visibility regressions.
 fn form() -> Vec<u8> {
     Pdf::new()
         .obj("<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] >> >>")
@@ -16,6 +17,7 @@ fn form() -> Vec<u8> {
         .build()
 }
 
+/// Restore optional saved preferences and open the synthetic document in a headless UI.
 fn harness(saved: Option<String>, bytes: Vec<u8>) -> Harness<'static, PdfCraftApp> {
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 1000.0)).build_eframe(move |_cc| {
         let mut app = PdfCraftApp::new();
