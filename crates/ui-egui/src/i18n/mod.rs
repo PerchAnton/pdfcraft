@@ -1796,6 +1796,7 @@ mod tests {
                 section.items.iter().for_each(|item| add(item.label));
             }
         }
+        pdfcraft_engine::catalog::TOOL_CATEGORIES.iter().for_each(|category| add(category.label));
         let engine: [&[&str]; 9] = [
             pdfcraft_engine::a11y::WORDINGS,
             pdfcraft_engine::a11y::REPORT_WORDS,
