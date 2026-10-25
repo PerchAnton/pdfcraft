@@ -44,6 +44,7 @@ enum Event {
     Inspect,
 }
 
+/// Build and save a synthetic two-page PDF with known standard and custom metadata.
 fn fixture(title: &str) -> Result<Arc<Vec<u8>>, String> {
     let mut session = Session::new();
     let bytes = session.create_blank(200.0, 300.0, 2).map_err(|e| e.to_string())?;
@@ -64,6 +65,7 @@ fn fixture(title: &str) -> Result<Arc<Vec<u8>>, String> {
     session.save_full_bytes(id).map_err(|e| e.to_string())
 }
 
+/// Expose actual engine metadata, edit generation and history labels for subset assertions.
 fn document_state(doc: &pdfcraft_engine::Document) -> Value {
     let custom: serde_json::Map<String, Value> = doc.custom_info().into_iter().map(|(k, v)| (k, json!(v))).collect();
     let custom_count = custom.len();
@@ -84,6 +86,7 @@ struct Adapter {
 }
 
 impl Adapter {
+    /// Open two independent fixtures and create a deterministic 60 Hz headless UI harness.
     fn new(artifacts: Option<PathBuf>) -> Result<Self, String> {
         let mut app = PdfCraftApp::new();
         app.set_option("language", "en")?;
@@ -103,14 +106,17 @@ impl Adapter {
         Ok(Self { h, originals, reopened: None, artifacts })
     }
 
+    /// Resolve the current document, returning a protocol error when no tab is active.
     fn active(&self) -> Result<DocId, String> {
         self.h.state().active_ids().map(|(_, id)| id).ok_or_else(|| "no active document".into())
     }
 
+    /// Report whether the active modal is a Document Properties tab.
     fn properties_open(&self) -> bool {
         matches!(self.h.state().dialog, Some(Dialog::Properties(_)))
     }
 
+    /// Replace an enabled property field through focus and keyboard events; never set its buffer directly.
     fn type_text(&mut self, field: &str, value: &str) -> Result<(), String> {
         if !self.properties_open() || !matches!(field, "Title" | "Author" | "Subject" | "Keywords" | "Name:" | "Value:") {
             return Err("no editable property field".into());
@@ -134,6 +140,7 @@ impl Adapter {
         Ok(())
     }
 
+    /// Click one enabled button or radio control; reject unsupported or ambiguous targets.
     fn click(&mut self, label: &str) -> Result<(), String> {
         if !self.properties_open() {
             return Err("properties dialog is closed".into());
@@ -165,6 +172,7 @@ impl Adapter {
         Ok(())
     }
 
+    /// Dispatch a semantic event through UI controls or the documented external-change engine path.
     fn event(&mut self, event: Event) -> Result<(), String> {
         match event {
             Event::Open => {
@@ -229,6 +237,7 @@ impl Adapter {
         Ok(())
     }
 
+    /// Report engine and draft state after an event, retaining any action error for the runner to assert.
     fn state(&self, error: Option<String>) -> Value {
         let app = self.h.state();
         let doc = app.active_ids().and_then(|(_, id)| app.session.get(id));
@@ -250,6 +259,7 @@ impl Adapter {
         })
     }
 
+    /// Optionally render a local PNG, reporting renderer setup or file errors as failures.
     fn snapshot(&mut self, step: u64) -> Result<(), String> {
         let Some(path) = &self.artifacts else { return Ok(()) };
         // kittest's optional renderer panics when no GPU/software adapter is available.
@@ -260,6 +270,7 @@ impl Adapter {
     }
 }
 
+/// Serve bounded protocol-1 JSONL requests in order, returning one state per request until EOF.
 fn main() -> Result<(), String> {
     let mut args = std::env::args().skip(1);
     let artifacts = match args.next().as_deref() {

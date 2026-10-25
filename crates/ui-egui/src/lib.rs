@@ -1093,6 +1093,7 @@ pub enum OpenOutcome {
 }
 
 impl PdfCraftApp {
+    /// Create an empty application with default UI preferences and no active property-edit session.
     pub fn new() -> Self {
         Self {
             session: Session::new(),

@@ -17,6 +17,7 @@ pub(crate) struct Values {
 }
 
 impl PartialEq for Values {
+    /// Compare accepted values using the dialog's whitespace and unordered Custom-row rules.
     fn eq(&self, other: &Self) -> bool {
         // Preserve the dialog's existing whitespace/no-op rules, without stripping spaces
         // from the text widgets while the user types. Custom row order is not a PDF edit.
@@ -28,10 +29,12 @@ impl PartialEq for Values {
 }
 
 impl Values {
+    /// Snapshot the editable values; PDF bytes and undo history remain owned by the engine.
     fn read(doc: &Document) -> Self {
         Self { description: INFO_KEYS.map(|key| doc.info_value(key).unwrap_or_default()), view: doc.initial_view(), custom: doc.custom_info() }
     }
 
+    /// Translate an accepted draft into existing engine edits, preserving unrelated PDF metadata.
     fn edits_to(&self, after: &Self) -> Vec<Edit> {
         let mut edits: Vec<Edit> = INFO_KEYS
             .iter()
@@ -61,6 +64,7 @@ pub(crate) struct Context {
 }
 
 impl Context {
+    /// Capture the identity, monotonic generation and permission that bind the draft.
     fn read(doc: &Document) -> Self {
         Self { document: doc.id, generation: doc.edit_generation(), editable: doc.allows_modification() }
     }
@@ -135,6 +139,7 @@ impl PdfCraftApp {
         }
     }
 
+    /// Whether a valid proposal needs OK/Cancel instead of the unchanged dialog's Close button.
     pub(crate) fn properties_changed(&self) -> bool {
         self.props_session.as_ref().is_some_and(|draft| draft.is_valid() && draft.original() != draft.preview())
     }
@@ -181,6 +186,7 @@ impl PdfCraftApp {
 mod tests {
     use super::*;
 
+    /// Create a one-page document with a pending title edit for direct commit-path regressions.
     fn app() -> PdfCraftApp {
         let mut app = PdfCraftApp::new();
         let bytes = app.session.create_blank(200.0, 300.0, 1).unwrap();
@@ -192,6 +198,7 @@ mod tests {
     }
 
     #[test]
+    /// A concurrent edit must be rejected at commit even before another UI frame checks freshness.
     fn commit_rechecks_revision_without_an_intervening_frame() {
         let mut app = app();
         let (_, id) = app.active_ids().unwrap();
@@ -206,6 +213,7 @@ mod tests {
     }
 
     #[test]
+    /// An invalid view must roll back the title too, retain input, and permit one corrected undo step.
     fn engine_refusal_retains_draft_and_retry_is_one_atomic_edit() {
         let mut app = app();
         let (_, id) = app.active_ids().unwrap();
@@ -233,6 +241,7 @@ mod tests {
     }
 
     #[test]
+    /// Matching form-buffer identities must also belong to the session's original document.
     fn buffers_from_another_document_cannot_commit() {
         let mut app = app();
         let (_, id) = app.active_ids().unwrap();

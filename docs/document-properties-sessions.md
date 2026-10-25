@@ -86,6 +86,19 @@ package/version/revision outside the existing storytold namespace. No other repo
 under the contributor's account is allowed. Updating either pin requires review.
 Python and the replay tool are development dependencies only.
 
+Adoption requires the supply-chain policy owner's explicit approval of both the
+runtime library and execution of the external replay runner in CI. Exact pins bound
+the reviewed source; they do not establish that approval.
+
+The shared release workflow currently rejects this external Git dependency even
+when the PR's CI passes. [craft-common-actions #84](https://github.com/storytold/craft-common-actions/pull/84)
+proposes the corresponding exception for the official `storytold/pdfcraft` caller
+and this exact package/version/revision, with regression tests. It is a draft policy
+proposal. Merge this integration only after the dependency decision and the shared
+release change; keep using the official shared release workflow.
+
 ## Revision history
 
+- 2026-10-25: document the pending dependency decisions and shared release prerequisite;
+  add function documentation for the session bridge, adapter and regression tests.
 - 2026-10-25: initial Document Properties integration and real UI replay adapter.

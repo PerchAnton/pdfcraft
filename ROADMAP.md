@@ -201,6 +201,8 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
+- **2026-10-25 (M4, #4594 review):** Documented the session bridge and replay adapter. Adoption remains pending both external-dependency decisions and the shared release gate proposal (craft-common-actions #84); behavior and estimates unchanged.
+
 - **2026-10-25 (M4):** Document Properties drafts now reject changed document identities/revisions, including reload and Undo/Redo, through pinned edit-session; real UI JSONL scenarios replay with interaction-check. Broader dialog invalidation remains separate (#3917); estimates unchanged.
 
 - **2026-10-24 (M14, #4253):** The annotation quick bar remembers Keep tool selected across restarts, including unpinning. Old and malformed settings keep safe defaults; the opt-in UI control channel reads and changes the same preference. Estimates unchanged.

@@ -9,6 +9,7 @@ use crate::{CloseRequest, Dialog, PdfCraftApp, PropsTab, panels::human_size, wid
 
 use crate::properties_session::INFO_KEYS;
 
+/// Draw modal dialogs with their cursor state, then draw an unlock prompt above Properties.
 pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
     // The page sets hover cursors from the raw pointer position (form fields, links, comments)
     // before any dialog is drawn, and nothing under a modal's backdrop takes clicks. Start from
@@ -21,6 +22,7 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
     unlock(app, ctx);
 }
 
+/// Advance modal state, validate property drafts, and dispatch confirmed actions after drawing.
 fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
     password(app, ctx);
     save_prompt(app, ctx);

@@ -6,6 +6,7 @@ use egui_kittest::kittest::Queryable;
 use pdfcraft_engine::Edit;
 use pdfcraft_ui_egui::PdfCraftApp;
 
+/// Open the real Properties dialog and type a title that has not entered document history.
 fn harness() -> Harness<'static, PdfCraftApp> {
     let mut h = Harness::builder().with_size(egui::vec2(1200.0, 900.0)).build_eframe(|_| {
         let mut app = PdfCraftApp::new();
@@ -22,6 +23,7 @@ fn harness() -> Harness<'static, PdfCraftApp> {
     h
 }
 
+/// Reproduce the baseline stale commit; a guarded dialog has already dismissed itself.
 fn confirm_if_still_open(h: &mut Harness<'static, PdfCraftApp>) {
     // On the baseline this commits the stale text. A guarded dialog has already closed.
     if h.state().dialog.is_some() {
@@ -31,6 +33,7 @@ fn confirm_if_still_open(h: &mut Harness<'static, PdfCraftApp>) {
 }
 
 #[test]
+/// A pending title must never replace metadata written by a later document edit.
 fn properties_session_does_not_overwrite_a_newer_document_edit() {
     let mut h = harness();
     let id = h.state().views[0].id;
@@ -45,6 +48,7 @@ fn properties_session_does_not_overwrite_a_newer_document_edit() {
 }
 
 #[test]
+/// Returning to the original value via Undo must still invalidate the draft and preserve Redo.
 fn properties_session_rejects_undo_back_to_the_original_value() {
     let mut h = harness();
     let id = h.state().views[0].id;
@@ -61,6 +65,7 @@ fn properties_session_rejects_undo_back_to_the_original_value() {
 }
 
 #[test]
+/// Inspection refresh must not rebase accepted edits or Custom input awaiting Add.
 fn properties_session_inspection_tabs_do_not_rebase_pending_input() {
     for unaccepted_custom in [false, true] {
         let mut h = harness();
