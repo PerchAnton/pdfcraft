@@ -62,6 +62,7 @@ mod pointer;
 mod preferences_layout;
 mod prepare;
 mod print;
+mod properties_session;
 mod protect;
 mod reading_colors;
 mod recovery;

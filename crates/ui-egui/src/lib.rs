@@ -64,6 +64,7 @@ mod marks_ui;
 mod measure_ui;
 mod ocr_ui;
 mod optimize_ui;
+mod properties_session;
 mod search_ui;
 mod sign_ui;
 mod stamps_ui;
@@ -803,6 +804,8 @@ pub struct PdfCraftApp {
     pub view_draft: Option<(DocId, pdfcraft_engine::InitialView)>,
     /// Document Properties ▸ Custom being edited.
     pub custom_draft: Option<(DocId, CustomDraft)>,
+    /// Original values and document revision for the editable Properties tabs.
+    pub(crate) props_session: Option<properties_session::Draft>,
     /// Files picked asynchronously for combine / insert (web).
     pub requests: files::Requests,
     /// Native file pickers in flight (they never block the frame; see `pickers`).
@@ -1190,6 +1193,7 @@ impl PdfCraftApp {
             props_draft: None,
             view_draft: None,
             custom_draft: None,
+            props_session: None,
             requests: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
             pickers: Default::default(),
