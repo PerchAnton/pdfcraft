@@ -201,10 +201,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
-- **2026-10-25 (M4, #4594 review):** Documented the session bridge and replay adapter. Adoption remains pending both external-dependency decisions and the shared release gate proposal (craft-common-actions #84); behavior and estimates unchanged.
-
-- **2026-10-25 (M4):** Document Properties drafts now reject changed document identities/revisions, including reload and Undo/Redo, through pinned edit-session; real UI JSONL scenarios replay with interaction-check. Broader dialog invalidation remains separate (#3917); estimates unchanged.
-
+- **2026-10-24 (M10, #4158 partial):** Word, HTML, RTF and PowerPoint export keep a block that continues another on its line (an italic case name, a link, a superscript) as a run in its own style inside that paragraph, with the source's word space, instead of a paragraph of its own. Style changes that wrap onto the next line still split paragraphs (the reading blocks keep style boundaries). Estimates unchanged.
 - **2026-10-24 (M3, window move on Wayland, #3970 follow-up):** After a move or resize by PdfCraft's own title bar or edges, the button release given back to egui goes before the pointer leaving the window, so hover no longer sticks at the old place until the pointer moves. Found by CodeRabbit in review of #3970; a unit test covers it. Estimates unchanged.
 - **2026-10-24 (M14, #4253):** The annotation quick bar remembers Keep tool selected across restarts, including unpinning. Old and malformed settings keep safe defaults; the opt-in UI control channel reads and changes the same preference. Estimates unchanged.
 
@@ -678,6 +675,10 @@ Newest first: the date, what moved, and the new overall estimate.
 
 - M13: common command, batch, inspection and bounded preview tools share the existing confined automation path. MCP tools carry complete hints and reject unknown top-level keys as invalid parameters.
 - **2026-10-10 (UI docking):** Tools and Inspector can be regrouped, split beside the PDF, or floated inside the app window. Existing toggles reopen panels at their saved locations; UI commands arrange/reset panels, and preferences retain their layout. Read/full-screen modes preserve the focused document view. No milestone percentage change.
+
+- **2026-10-25 (M4, #4594 review):** Documented the session bridge and replay adapter. Adoption remains pending both external-dependency decisions and the shared release gate proposal (craft-common-actions #84); behavior and estimates unchanged.
+
+- **2026-10-25 (M4):** Document Properties drafts now reject changed document identities/revisions, including reload and Undo/Redo, through pinned edit-session; real UI JSONL scenarios replay with interaction-check. Broader dialog invalidation remains separate (#3917); estimates unchanged.
 
 ## Revision history
 
