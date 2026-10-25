@@ -39,6 +39,8 @@
 //!   `form-reminder=on|off` persistently shows or hides the ordinary form-field reminder,
 //!   independently of security, repair and XFA notices. `ui.state.show_form_field_reminder`
 //!   reports the choice; it can also be changed before opening a document.
+//!   `comment-tool-pinned=true|false` remembers the annotation quick bar's pin across restarts;
+//!   `ui.state.comment_tool_pinned` reports the same preference.
 //! - `ui.open {path}`: open a file. A file whose tab is already open focuses it
 //!   (`"focused": true`) instead of adding a tab; native opens report `pending: true` until
 //!   they complete and are listed in `ui.state.pending_opens`; only a failed open replies `Err`.
@@ -736,6 +738,7 @@ impl Host for crate::PdfCraftApp {
             "mode": format!("{:?}", self.mode),
             "default_mode": self.default_mode,
             "show_form_field_reminder": self.show_form_field_reminder,
+            "comment_tool_pinned": self.comment_prefs.pinned,
             "left_panel": if self.left_open { json!(format!("{:?}", self.left)) } else { Value::Null },
             "tools_side": if self.docking.tools_on_right() { "right" } else { "left" },
             "right_panel": self.right.map(|r| format!("{r:?}")),

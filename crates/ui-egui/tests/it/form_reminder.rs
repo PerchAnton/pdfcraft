@@ -198,6 +198,39 @@ fn a_hidden_form_reminder_does_not_hide_security_notices() {
     }
 }
 
+/// The security-notice preference and ordinary form reminder remain independent after restart.
+#[test]
+fn form_and_security_notice_preferences_remain_independent() {
+    let mut doc = pdfcraft_cos::Document::open(std::sync::Arc::new(form())).unwrap();
+    doc.set_encryption(&pdfcraft_cos::NewEncryption {
+        algorithm: pdfcraft_cos::Algorithm::Aes256,
+        user_password: "",
+        owner_password: "synthetic-owner",
+        permissions: 0b0100,
+        encrypt_metadata: true,
+        seed: [8; 32],
+    })
+    .unwrap();
+    let bytes = pdfcraft_cos::write_full(&doc, &Default::default()).unwrap();
+    for show_form in [false, true] {
+        for show_security in [false, true] {
+            let settings = serde_json::json!({
+                "show_form_field_reminder": show_form,
+                "show_secured_notice": show_security,
+            })
+            .to_string();
+            let h = harness(Some(settings), bytes.clone());
+            let settings = h.state().persist();
+            let h = harness(Some(settings), bytes.clone());
+            assert_eq!(h.query_by_label_contains("This document is secured").is_some(), show_security);
+            assert_eq!(h.query_by_label(REMINDER).is_some(), show_form && !show_security);
+            let id = h.state().views[0].id;
+            assert!(h.state().session.get(id).unwrap().security_summary().is_some_and(|s| !s.owner));
+            assert!(!h.state().session.get(id).unwrap().dirty);
+        }
+    }
+}
+
 /// XFA status and disabled-script warnings keep their existing dismissal behaviour.
 #[test]
 fn a_hidden_form_reminder_does_not_hide_xfa_notices() {
