@@ -256,7 +256,7 @@ Estimates unchanged.
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-25 | minor | M4, #4594 review: function documentation and explicit dependency-policy/shared-release prerequisites; behavior and estimates unchanged. |
+| 2026-10-25 | minor | M4, #4594 review: function documentation, stale-notice translation scanning and explicit dependency-policy/shared-release prerequisites; draft behavior and estimates unchanged. |
 | 2026-10-24 | minor | M3, #3970 follow-up: the button release given back after a window move or resize goes before the pointer leaving, so hover doesn't stick. Estimates unchanged. |
 | 2026-10-23 | minor | M8, #3205 follow-up: phone-pattern redaction includes the +39 country code on labelled Italian geographic numbers with a slash; dates, protocol identifiers and whole-run guards remain. Estimates unchanged. |
 | 2026-10-23 | minor | M10: Word table cells use the grid columns they span, including cells after a merged cell; synthetic export regression and CLI reproduction. Estimates unchanged. |

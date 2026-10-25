@@ -6,7 +6,6 @@ use pdfcraft_engine::{DocId, Document, Edit, InitialView};
 use crate::{CustomDraft, PdfCraftApp};
 
 pub(crate) const INFO_KEYS: [&str; 4] = ["Title", "Author", "Subject", "Keywords"];
-const STALE: &str = "The document changed. Reopen Document Properties to edit the current version.";
 
 /// The small, accepted values shared by the Description, Initial View and Custom tabs.
 #[derive(Clone, Debug)]
@@ -109,7 +108,7 @@ impl PdfCraftApp {
             self.discard_properties();
             self.dialog = None;
             if stale {
-                self.notify_tr(STALE);
+                self.notify(tl!("The document changed. Reopen Document Properties to edit the current version.").to_string());
             }
             return false;
         }
@@ -175,7 +174,7 @@ impl PdfCraftApp {
             Ok(None) => true,
             Err(_) => {
                 self.discard_properties();
-                self.notify_tr(STALE);
+                self.notify(tl!("The document changed. Reopen Document Properties to edit the current version.").to_string());
                 true
             }
         }

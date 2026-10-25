@@ -989,6 +989,12 @@ mod tests {
         literals
     }
 
+    /// The stale-draft notice must be discoverable even before any catalog translates it.
+    #[test]
+    fn properties_stale_notice_is_in_translation_scan() {
+        assert!(ui_literals().contains("The document changed. Reopen Document Properties to edit the current version."));
+    }
+
     /// Each translated label of a visible signature that runs into its value keeps a separator
     /// at its end.
     #[test]

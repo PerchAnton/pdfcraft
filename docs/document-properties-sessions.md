@@ -7,6 +7,8 @@ Document Properties binds its Description, Initial View and accepted Custom valu
 the document identity, edit generation and modification permission at opening. A
 different document, reload, edit or Undo/Redo closes the stale dialog with a notice.
 Returning to the original values through Undo still invalidates the old draft.
+The notice is included in the translation-gap scan; catalogs without its translation
+retain the standard English fallback.
 Clean inspection tabs (Fonts, Advanced, Security, Space Audit) retain live refresh for
 the same document; they never rebase accepted edits or pending Custom Name/Value input.
 
@@ -100,5 +102,6 @@ release change; keep using the official shared release workflow.
 ## Revision history
 
 - 2026-10-25: document the pending dependency decisions and shared release prerequisite;
-  add function documentation for the session bridge, adapter and regression tests.
+  add function documentation for the session bridge, adapter and regression tests,
+  and cover discovery of the stale notice by the translation scanner.
 - 2026-10-25: initial Document Properties integration and real UI replay adapter.
