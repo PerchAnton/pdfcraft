@@ -29,9 +29,14 @@ fn harness_with_printers() -> (Harness<'static, PdfCraftApp>, String) {
     let mut h = harness();
     let last = "München Satellite 119 - Engineering floor 4 (network queue) - colour duplex device, Building North".to_string();
     let mut printers: Vec<_> = (0..119)
-        .map(|i| Printer { name: format!("Office {i:03} - Engineering floor 4 (network queue)"), default: i == 0, two_sided: None })
+        .map(|i| Printer {
+            name: format!("Office {i:03} - Engineering floor 4 (network queue)"),
+            description: String::new(),
+            default: i == 0,
+            two_sided: None,
+        })
         .collect();
-    printers.push(Printer { name: last.clone(), default: false, two_sided: None });
+    printers.push(Printer { name: last.clone(), description: String::new(), default: false, two_sided: None });
     h.state_mut().printer_source = Some(std::sync::Arc::new(move || printers.clone()));
     assert!(h.state_mut().execute("print.dialog"));
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
@@ -126,6 +131,15 @@ fn printer_picker_scrolls_long_names_without_losing_the_search_or_pdf_choice() {
     assert_eq!(h.state().print_draft.printer, None, "the PDF row must be clickable with the full fleet shown");
 }
 
+/// The page-range field is labelled by the Pages radio button rather than floating unnamed.
+#[test]
+fn the_page_range_field_is_named_for_screen_readers() {
+    let mut h = harness();
+    assert!(h.state_mut().execute("print.dialog"));
+    h.run_steps(3);
+    h.get_by_role_and_label(Role::TextInput, "Pages");
+}
+
 #[test]
 fn current_print_page_saves_the_viewed_page_when_labels_restart() {
     // Five distinct painted pages, labelled i, ii, iii, 1, 2.
@@ -165,7 +179,7 @@ fn current_print_page_saves_the_viewed_page_when_labels_restart() {
         h.run_steps(3);
         assert!(h.state_mut().execute("print.dialog"));
         h.run_steps(3);
-        h.get_by_label("Current page").click();
+        h.get_by_role_and_label(Role::RadioButton, "Current page").click();
         h.run_steps(3);
         assert_eq!(h.state().print_draft.current_page, current);
         h.get_by_label("Sheet 1 of 1");
@@ -381,8 +395,8 @@ fn printers_listed_in_the_background_preselect_the_default_unless_one_was_picked
     h.state_mut().printer_source = Some(Arc::new(move || {
         let _open = wait.lock();
         vec![
-            Printer { name: "Office".into(), default: false, two_sided: None },
-            Printer { name: "Front Desk".into(), default: true, two_sided: None },
+            Printer { name: "Office".into(), default: false, two_sided: None, description: String::new() },
+            Printer { name: "Front Desk".into(), default: true, two_sided: None, description: String::new() },
         ]
     }));
     assert!(h.state_mut().execute("print.dialog"));
@@ -438,7 +452,10 @@ fn the_picked_printer_is_kept_for_the_next_print_while_it_is_listed() {
     let source = listed.clone();
     h.state_mut().printer_source = Some(Arc::new(move || {
         let names = source.lock().map(|n| n.clone()).unwrap_or_default();
-        names.into_iter().map(|name| Printer { name: name.into(), default: name == "Front Desk", two_sided: None }).collect()
+        names
+            .into_iter()
+            .map(|name| Printer { name: name.into(), default: name == "Front Desk", two_sided: None, description: String::new() })
+            .collect()
     }));
     let open = |h: &mut Harness<'static, PdfCraftApp>| {
         h.state_mut().dialog = None;
@@ -525,8 +542,8 @@ fn a_printer_without_two_sided_printing_points_to_its_properties() {
     let mut h = harness();
     h.state_mut().printer_source = Some(std::sync::Arc::new(|| {
         vec![
-            Printer { name: "Office PCL".into(), default: true, two_sided: Some(true) },
-            Printer { name: "Office PS".into(), default: false, two_sided: Some(false) },
+            Printer { name: "Office PCL".into(), default: true, two_sided: Some(true), description: String::new() },
+            Printer { name: "Office PS".into(), default: false, two_sided: Some(false), description: String::new() },
         ]
     }));
     assert!(h.state_mut().execute("print.dialog"));
@@ -988,10 +1005,10 @@ fn a_booklet_decides_two_sided_itself() {
     h.run_steps(3);
     h.state_mut().print_draft.duplex = Some(Duplex::LongEdge);
     h.run_steps(1);
-    assert!(h.query_by_label("Two-sided:").is_some());
+    assert!(h.query_by_role_and_label(Role::ComboBox, "Two-sided:").is_some());
     h.get_by_label("Booklet").click();
     h.run_steps(2);
-    assert!(h.query_by_label("Two-sided:").is_none(), "hidden while Booklet is chosen");
+    assert!(h.query_by_role_and_label(Role::ComboBox, "Two-sided:").is_none(), "hidden while Booklet is chosen");
     let d = &h.state().print_draft;
     assert_eq!(d.duplex, Some(Duplex::LongEdge), "the Two-sided choice is kept");
     assert_eq!(d.job("x").duplex, Some(Duplex::ShortEdge), "both sides flip on the short edge");
@@ -1001,6 +1018,6 @@ fn a_booklet_decides_two_sided_itself() {
     }
     h.get_by_label("Size").click();
     h.run_steps(2);
-    assert!(h.query_by_label("Two-sided:").is_some());
+    assert!(h.query_by_role_and_label(Role::ComboBox, "Two-sided:").is_some());
     assert_eq!(h.state().print_draft.job("x").duplex, Some(Duplex::LongEdge), "back to the choice");
 }
