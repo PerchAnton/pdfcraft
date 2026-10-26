@@ -5,10 +5,12 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 use pdfcraft_ui_egui::{Dialog, PdfCraftApp};
 
+/// Open a bundled synthetic form with the default print settings.
 fn harness() -> Harness<'static, PdfCraftApp> {
     harness_with_settings(None)
 }
 
+/// Restore optional settings before opening the form and settling the shell frames.
 fn harness_with_settings(settings: Option<String>) -> Harness<'static, PdfCraftApp> {
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
         let mut app = PdfCraftApp::new();
@@ -126,6 +128,14 @@ fn printer_picker_scrolls_long_names_without_losing_the_search_or_pdf_choice() {
     assert_eq!(h.state().print_draft.printer.as_deref(), Some(last.as_str()));
     h.get_by_value(&last).click();
     h.run_steps(3);
+    // Reopening must scroll to the selection itself; manual scrolling would mask a regression.
+    let search = h.get_by_role_and_label(Role::TextInput, "Search printers").rect();
+    let row = h.get_by_label(&last).rect();
+    let pdf = h.get_by_label("Save as PDF").rect();
+    assert!(
+        row.top() >= search.bottom() && row.bottom() <= pdf.top(),
+        "the selected printer is visible on reopening: {row:?}, search {search:?}, PDF {pdf:?}"
+    );
     h.get_by_label("Save as PDF").click();
     h.run_steps(3);
     assert_eq!(h.state().print_draft.printer, None, "the PDF row must be clickable with the full fleet shown");
