@@ -1,9 +1,8 @@
 # Interface language
 
+> **Last reviewed:** 2026-10-27 · **Last updated:** 2026-10-27 · **Change:** minor (native macOS file-panel language declarations; localization remains partial)
+
 Choose **Menu > Edit > Preferences…** (Command-comma on macOS, Ctrl-comma elsewhere) **> Interface language** and select **Auto**, **English**, **日本語**, **简体中文**, **繁體中文**, **Čeština**, **Português (Brasil)**, **Deutsch**, **Español**, **Français**, **Русский**, **Қазақша**, **Български**, **తెలుగు**, **Magyar**, **Українська**, **Italiano**, **العربية**, **کوردیی ناوەندی**, **فارسی**, **Polski**, **Slovenščina**, **Ελληνικά**, **Türkçe**, **Lietuvių**, **Tiếng Việt**, **Suomi**, **Shqip**, **Català**, **Română** or **Norsk bokmål**. The change applies immediately and persists between launches. Command ids, document contents and file names are unchanged.
-
-> **Last reviewed:** 2026-10-17 · **Last updated:** 2026-10-17 · **Change:** minor (#2668 item 1: native macOS file-panel language declarations; overall localization remains partial)
-
 
 Displayed keyboard shortcuts use the same active interface language. For example, German shows `Strg+K` and `Strg+Umschalt+S` in the toolbar, menus, command palette, tooltips and Keyboard shortcuts dialog; macOS keeps its modifier symbols (`⌘`, `⇧`, `⌃`). Key names have their own `key` catalog context, so the Delete key can read `Entf` while the command remains `Löschen`. A missing key-name entry falls back to the English key name. Actual bindings and machine-facing command ids remain stable.
 
@@ -98,12 +97,9 @@ Error details that come from the operating system, and faults rather than mistak
 ## Adding a language
 
 1. Copy the header of `ja.tsv` into `xx.tsv` and translate entries.
-2. Add one row to `LANGUAGES` in `crates/ui-egui/src/i18n/mod.rs`: code, native name, catalog and plural rule.
-3. Add the same BCP 47 language code to `CFBundleLocalizations` in `packaging/macos/Info.plist.in`.
-   Keep base `pt` alongside `pt-BR` for the Portuguese locale fallback. The
-   `macos_bundle_declares_ui_languages_and_english_fallback` integration test checks the declaration
-   against the registry; macOS packaging also validates the plist with `plutil`.
-4. Add an `ATTRIBUTION.toml` entry for the catalog (`kind = "translation"`), with the catalog's `sha256sum` as `sha256`, then run `cargo xtask assets --write` (it regenerates `ATTRIBUTION.md` only) and `cargo xtask assets`.
+2. Add one row to `LANGUAGES` in `crates/ui-egui/src/i18n.rs`: code, native name, catalog and plural rule.
+3. Add the same BCP 47 code to `CFBundleLocalizations` in `packaging/macos/Info.plist.in`. Keep base `pt` alongside `pt-BR`; `macos_bundle_declares_ui_languages_and_english_fallback` checks the set.
+4. Add an `ATTRIBUTION.toml` entry for the catalog (`kind = "translation"`, no `sha256`), then run `cargo xtask assets --write` (it regenerates `ATTRIBUTION.md` only) and `cargo xtask assets`.
 
 The Preferences dropdown, the system-language match, the catalog tests (format, duplicates, placeholders, plural forms, command ids) and the translation gaps report then pick it up.
 
@@ -113,4 +109,5 @@ The egui 0.37 migration pins craft-fonts `b076417b5880bd4154bd22f00695b1d28c6bea
 
 | Date | Change | Summary |
 | --- | --- | --- |
-| 2026-10-17 | minor | #2668 item 1: declare native macOS file-panel languages, retain English fallback and document the distinction from the in-app preference. |
+| 2026-10-27 | minor | Retain upstream module paths and catalog provenance policy alongside native macOS panel language declarations (#2668 item 1). |
+| 2026-10-17 | minor | Declare native panel languages and document the in-app preference distinction. |
