@@ -1,3 +1,4 @@
+use super::HeadingResolver;
 use super::interp::{Carry, interpret};
 use super::lines::{content_streams, page_dict, reading_lines, rewritten_contents, splice, text_lines};
 use super::rewrite::{LineEdit, coincident_ops, rewrite_block};
