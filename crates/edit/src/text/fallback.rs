@@ -1,3 +1,4 @@
+use super::HashSet;
 use super::interp::Ts;
 use super::lines::page_dict;
 use super::{
