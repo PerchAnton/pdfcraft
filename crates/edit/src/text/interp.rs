@@ -1,6 +1,6 @@
 use super::fallback::is_type3_fallback;
 use super::rewrite::vertical_advance;
-use super::*;
+use super::{ContentScope, Dict, Document, EditError, HashMap, MarkedScope, Matrix, Metrics, Object, Op, Rc, TextProperties};
 
 /// Text and graphics state captured for rewriting.
 #[derive(Clone, Debug, PartialEq)]
