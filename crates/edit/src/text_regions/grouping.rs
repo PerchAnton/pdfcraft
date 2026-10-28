@@ -1,4 +1,4 @@
-use super::*;
+use super::{HashMap, Matrix, TextBlock, TextLine, paragraph_separator, same_base_font, same_font, strip_subset_tag, union};
 
 /// Require compatible transforms, paint and structure scope before grouping text.
 fn same_plane(a: &TextLine, b: &TextLine) -> bool {
