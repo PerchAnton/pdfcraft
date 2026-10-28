@@ -1771,7 +1771,7 @@ fn finish_edits(app: &mut PdfCraftApp, dialog: Dialog, req: &mut Pending) {
     if let Some(by) = req.split_now.take() {
         app.split_active(&by);
     }
-    if req.apply {
+    if req.apply && matches!(dialog, Dialog::Properties(_)) {
         req.close = app.finish_properties();
     }
 }
