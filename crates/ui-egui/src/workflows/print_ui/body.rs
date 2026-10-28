@@ -82,7 +82,7 @@ fn combo<T: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, name: &str, value: &m
 /// A wide, searchable fleet list; filtering never changes the selected destination.
 fn printer_picker(ui: &mut egui::Ui, d: &mut PrintDraft) -> egui::Response {
     // ComboBox derives its button id from the prehashed salt stored by its builder.
-    let open = egui::ComboBox::is_open(ui.ctx(), ui.make_persistent_id(egui::IdSalt::new("printer")));
+    let open = craft_ui::ComboBox::is_open(ui.ctx(), ui.make_persistent_id(egui::IdSalt::new("printer")));
     let filter_id = ui.make_persistent_id("printer-filter");
     let mut filter = ui.data(|data| data.get_temp::<String>(filter_id)).unwrap_or_default();
     if !open {
@@ -96,7 +96,7 @@ fn printer_picker(ui: &mut egui::Ui, d: &mut PrintDraft) -> egui::Response {
     let screen = ui.ctx().content_rect();
     let width = 430.0_f32.min((screen.width() - 32.0).max(0.0));
     let height = 420.0_f32.min(screen.height() * 0.6);
-    let response = egui::ComboBox::from_id_salt("printer")
+    let response = craft_ui::ComboBox::from_id_salt("printer")
         .selected_text(&shown)
         .width(260.0)
         .truncate()
