@@ -562,6 +562,42 @@ fn flattening_draws_appearances_into_the_page_and_removes_the_comments() {
     assert!(marks_present(&doc).is_empty(), "flattened content is not a removable mark");
 }
 
+/// #2368: a widget with /NoRotate on a rotated page is shown upright, turned with the page's
+/// /Rotate about its rectangle's upper-left corner (§12.5.3, as MuPDF and Poppler draw it).
+/// Flattening drew its appearance at the rectangle as it is, so the widget turned sideways and
+/// moved; a neighbour without the flag is unchanged, and so is everything on an unrotated page.
+#[test]
+fn flattening_keeps_a_no_rotate_widget_upright_on_a_rotated_page() {
+    let page = stream("", " ");
+    let form = "<< /Type /XObject /Subtype /Form /BBox [0 0 100 50] /Length 15 >>\nstream\n0 0 100 50 re f\nendstream";
+    for (rotate, plain, upright) in [
+        (0, "q 1 0 0 1 100 500 cm /PCFl0 Do Q", "q 1 0 0 1 100 500 cm /PCFl1 Do Q"),
+        (90, "q 1 0 0 1 100 500 cm /PCFl0 Do Q", "q 0 1 -1 0 150 550 cm /PCFl1 Do Q"),
+        (180, "q 1 0 0 1 100 500 cm /PCFl0 Do Q", "q -1 0 0 -1 100 600 cm /PCFl1 Do Q"),
+        (270, "q 1 0 0 1 100 500 cm /PCFl0 Do Q", "q 0 -1 1 0 50 550 cm /PCFl1 Do Q"),
+    ] {
+        let widget =
+            |flags: i64| format!("<< /Type /Annot /Subtype /Widget /FT /Tx /T (f{flags}) /Rect [100 500 200 550] /F {flags} /AP << /N 7 0 R >> >>");
+        let mut doc = build(&[
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R] >> >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            &format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Rotate {rotate} /Resources << >> /Contents 6 0 R /Annots [4 0 R 5 0 R] >>"
+            ),
+            &widget(4),
+            &widget(4 | 16),
+            &page,
+            form,
+        ]);
+        assert_eq!(flatten(&mut doc, &[0], false, true).unwrap(), 2);
+        let doc = reopen(&doc);
+        let s = streams(&doc, 0);
+        let flat = s.last().unwrap();
+        assert!(flat.contains(plain), "/Rotate {rotate}: {flat}");
+        assert!(flat.contains(upright), "/Rotate {rotate}: {flat}");
+    }
+}
+
 /// #1317: a cloudy square this builder cannot draw stays on the page. A solid square, a hidden
 /// cloudy square and a cloudy square that already has an appearance keep their previous results.
 #[test]
@@ -4011,6 +4047,25 @@ fn page_with_forms(content: &str, forms: &[(String, String)]) -> Document {
     ];
     objs.extend(forms.iter().map(|(_, body)| stream(&format!("/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources {resources}"), body)));
     build(&objs.iter().map(String::as_str).collect::<Vec<_>>())
+}
+
+/// A nested form keeps its inherited heading while q/Q restores its text and line matrices.
+#[test]
+fn inherited_heading_survives_text_matrix_restore_in_a_nested_form() {
+    let page = "/Span <</MCID 0>> BDC /A Do EMC";
+    let forms = |text: &str| [("A".into(), "/B Do".into()), ("B".into(), text.into())];
+    let control = page_with_forms(page, &forms("BT /F1 12 Tf 14 TL 72 650 Td T* (Restored heading) Tj ET"));
+    let doc = page_with_forms(page, &forms("BT /F1 12 Tf 14 TL 72 650 Td q 1 0 0 1 300 300 Tm Q T* (Restored heading) Tj ET"));
+    let before = write_incremental(&doc, &SaveOptions::default()).unwrap();
+    let levels = |stream: Option<pdfcraft_cos::ObjRef>, mcid| if stream.is_none() && mcid == 0 { Some((10, 3)) } else { None };
+    let expected = reading_blocks_with_heading_levels(&control, 0, &levels).unwrap();
+    let actual = reading_blocks_with_heading_levels(&doc, 0, &levels).unwrap();
+    assert!(!actual.truncated);
+    assert_eq!(actual.blocks.len(), 2);
+    assert_eq!(actual.blocks[1].text, "Restored heading");
+    assert_eq!(actual.blocks[1].heading_level, Some(3));
+    assert_eq!(actual.blocks[1].rect, expected.blocks[1].rect);
+    assert_eq!(write_incremental(&doc, &SaveOptions::default()).unwrap(), before);
 }
 
 /// #3727: each Do keeps the marked context active at that operator, even after EMC.
@@ -7688,4 +7743,25 @@ fn a_run_of_spaces_in_a_subset_without_a_space_glyph_keeps_its_width() {
     assert_eq!(text::replace_block(&mut doc, 0, 0, "ab  ba   ab").unwrap().substituted, None);
     let content = String::from_utf8_lossy(&page_content_bytes(&reopen(&doc), 0)).into_owned();
     assert_eq!(content.matches("[-330] TJ").count(), 5, "{content}");
+}
+
+/// Inside a text object `q`/`Q` save and restore the text and text line matrices (ISO 32000-2
+/// §9.4.1, as corrected by the PDF Association's errata, issue 368), as the renderer does: the
+/// text after `Q` is found, and stays, where it is drawn.
+#[test]
+fn q_inside_a_text_object_restores_the_text_matrices() {
+    for (content, text, baseline) in [
+        ("BT /F1 12 Tf 72 700 Td q 0 -100 Td Q (After) Tj ET", "After", [72.0, 700.0]),
+        ("BT /F1 12 Tf 72 700 Td q 1 0 0 1 300 300 Tm Q (After) Tj ET", "After", [72.0, 700.0]),
+        // `T*` moves from the restored line, not the one set inside q/Q.
+        ("BT /F1 12 Tf 14 TL 72 700 Td q 0 -100 Td Q T* (Next) Tj ET", "Next", [72.0, 686.0]),
+    ] {
+        let mut doc = text_page(content);
+        let lines = text::text_lines(&doc, 0).unwrap();
+        assert_eq!((lines[0].text.as_str(), lines[0].baseline()), (text, baseline), "{content}");
+        text::replace_line(&mut doc, 0, 0, "Edited").unwrap();
+        let doc = reopen(&doc);
+        let lines = text::text_lines(&doc, 0).unwrap();
+        assert_eq!((lines[0].text.as_str(), lines[0].baseline()), ("Edited", baseline), "{content} after editing");
+    }
 }

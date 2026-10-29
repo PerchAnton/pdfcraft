@@ -426,7 +426,10 @@ fn positioned_tracking(shown: &mut [Shown]) {
 /// stream), an unbalanced `q`, the font and the colour still apply in the streams after it.
 pub(super) struct Carry {
     pub(super) ts: Ts,
-    pub(super) stack: Vec<Ts>,
+    /// Each saved state with the text and text line matrices: inside a text object `q`/`Q`
+    /// save and restore them too (ISO 32000-2 §9.4.1, as corrected by the PDF Association's
+    /// errata, issue 368), as the renderer does.
+    pub(super) stack: Vec<(Ts, Matrix, Matrix)>,
     pub(super) marked: Vec<MarkedScope>,
     // Local EMC operators cannot close the caller form's marked span.
     pub(super) parent: MarkedScope,
@@ -794,7 +797,7 @@ pub(super) fn interpret(
     let mut out: Vec<Shown> = Vec::new();
     let mut ts = carry.ts.clone();
     let mut at_bt = (0usize, ts.clone());
-    let mut stack: Vec<Ts> = std::mem::take(&mut carry.stack);
+    let mut stack: Vec<(Ts, Matrix, Matrix)> = std::mem::take(&mut carry.stack);
     let (mut tm, mut tlm) = (Matrix::IDENTITY, Matrix::IDENTITY);
     let mut bt = 0usize;
     let mut marked = MarkedContent {
@@ -814,10 +817,10 @@ pub(super) fn interpret(
             b"EMC" => {
                 marked.end(i, &mut out);
             }
-            b"q" => stack.push(ts.clone()),
+            b"q" => stack.push((ts.clone(), tm, tlm)),
             b"Q" => {
-                if let Some(s) = stack.pop() {
-                    ts = s;
+                if let Some(saved) = stack.pop() {
+                    (ts, tm, tlm) = saved;
                 }
             }
             b"cm" => {
