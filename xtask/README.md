@@ -19,7 +19,7 @@ A file-only citation such as `lib.rs` requires an indexed file. A qualified
 citation such as `lib.rs::tests::replacement` also requires its final symbol.
 This is a lightweight name index, not a Rust parser: it does not establish
 the full module path, require a `#[test]` attribute, or prove that a cited
-test ran. Vendored test execution is a separate workflow.
+test ran. Bare snake_case names in the Test column must resolve to a function or module.
 
 The scanner reads ASCII identifiers at the keyword boundary, ignores function
 pointer syntax, and checks the immediate function parameter list, allowing
@@ -28,9 +28,7 @@ text without slicing inside a character. Patch-marker warnings use the
 highest explicit `(n)` number from 1 through 500, including numbers after a
 gap; prose such as `(4 GiB)` is not a patch number. Gaps are not filled in.
 
-`vendor-ledger.yml` follows all indexed source trees and the checker/build
-inputs. It sets up stable Rust, uses a dedicated build cache, and retains
-the five-minute job limit. `vendor-patches.yml` runs the larger vendored
-test/compile matrix separately, so a workspace-only test rename triggers
-the ledger check without rebuilding that matrix. Both workflows retain
-their advisory status (`continue-on-error`) pending gate graduation.
+The ordinary workspace test suite runs the checker's regression tests. Run
+`cargo xtask vendor-ledger` explicitly to audit the current ledger. To test
+a vendored crate itself, use, for example,
+`cargo test --manifest-path vendor/hayro-syntax/Cargo.toml --lib`.

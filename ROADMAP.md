@@ -172,7 +172,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
-- **2026-11-04 (M0):** Vendor-ledger checking handles Unicode safely, rejects missing file-qualified symbols, and counts patch numbers after gaps. Regressions also retain hayro-syntax patches 15–21 and their proofs; source-only edits trigger the separate ledger workflow. Estimates unchanged.
+- **2026-11-04 (M0):** Vendor-ledger checking handles Unicode safely, rejects missing file-qualified symbols, and counts patch numbers after gaps. Regressions also retain hayro-syntax patches 15–21 and their proofs; the workspace suite runs the checker's regression tests. Estimates unchanged.
 
 - **2026-10-19 (M14, #3373):** The main menu and its long submenus scroll in short windows, keeping their commands reachable. Estimates unchanged.
 

@@ -258,6 +258,20 @@ fn classify(cite: &str, index: &Index) -> Verdict {
     Verdict::Skip // a bare word that is not a test — prose
 }
 
+/// A bare snake_case name in the Test column refers to a function or module.
+fn classify_test(cite: &str, index: &Index) -> Verdict {
+    let cite = cite.trim();
+    let verdict = classify(cite, index);
+    if verdict == Verdict::Skip
+        && cite.starts_with(|c: char| c.is_ascii_lowercase())
+        && cite.contains('_')
+        && cite.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+    {
+        return if index.mods.contains(cite) { Verdict::Ok } else { Verdict::Missing };
+    }
+    verdict
+}
+
 /// `name = { path = "vendor/<dir>"` entries of `[patch.crates-io]`:
 /// (crate name, vendored directory).
 fn patched_crates(root: &Path) -> Result<BTreeMap<String, String>> {
@@ -411,6 +425,7 @@ pub fn run(args: &[String]) -> Result<()> {
     let mut fatal: Vec<String> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
     let mut checked = 0usize;
+    let mut highest_by_crate = BTreeMap::<String, usize>::new();
 
     for row in ledger_rows(&ledger) {
         let Some(dir) = patched.get(&row.crate_name) else { continue };
@@ -425,7 +440,7 @@ pub fn run(args: &[String]) -> Result<()> {
             }
         }
         for cite in backticks(&row.tests) {
-            let verdict = classify(cite, &index);
+            let verdict = classify_test(cite, &index);
             checked += 1;
             if show_all {
                 println!("[{:?}] {}: {}", verdict, row.crate_name, cite);
@@ -434,14 +449,9 @@ pub fn run(args: &[String]) -> Result<()> {
                 fatal.push(format!("cited test not found: {}: `{}`", row.crate_name, cite));
             }
         }
-        let dir = dir.clone();
         let top = highest_patch_number(&row.patches);
-        let markers = if top > 0 { crate_text(&root, &dir).to_lowercase().matches("pdfcraft patch").count() } else { 0 };
-        for n in 1..=top {
-            if markers < n {
-                warnings.push(format!("ledger claims {n} patches for {} but only {markers} 'pdfcraft patch' markers in source", row.crate_name));
-            }
-        }
+        let highest = highest_by_crate.entry(row.crate_name).or_default();
+        *highest = (*highest).max(top);
     }
 
     // Prose around the table also cites tests; scan every non-table line so
@@ -454,7 +464,14 @@ pub fn run(args: &[String]) -> Result<()> {
         }
     }
 
-    for crate_name in patched.keys() {
+    for (crate_name, dir) in &patched {
+        if let Some(&top) = highest_by_crate.get(crate_name).filter(|&&n| n > 0) {
+            let markers = crate_text(&root, dir).to_lowercase().matches("pdfcraft patch").count();
+            if markers < top {
+                warnings.push(format!("{crate_name}: highest ledger patch is {top}, but the source has only {markers} 'PdfCraft patch' markers"));
+            }
+        }
+
         let has_row = ledger.lines().any(|l| {
             let t = l.trim_start();
             t.starts_with('|') && {
@@ -489,6 +506,17 @@ mod tests {
             mods: BTreeSet::from(["tests".to_owned(), "raster".to_owned()]),
             files: BTreeSet::from(["lib.rs".to_owned(), "raster.rs".to_owned()]),
         }
+    }
+
+    #[test]
+    fn bare_test_names_are_required_only_in_the_test_column() {
+        let mut index = fake_index();
+        index.mods.insert("existing_tests".into());
+        assert_eq!(classify_test("offsets_survive_a_roundtrip", &index), Verdict::Ok);
+        assert_eq!(classify_test("existing_tests", &index), Verdict::Ok);
+        assert_eq!(classify_test("missing_review_regression", &index), Verdict::Missing);
+        assert_eq!(classify("missing_review_regression", &index), Verdict::Skip);
+        assert_eq!(classify_test("cargo test -p a_crate", &index), Verdict::Skip);
     }
 
     #[test]
